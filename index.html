@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-fullscreen">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>Mobile Mapper - Projection Mapping</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Main Canvas -->
+        <canvas id="mainCanvas"></canvas>
+        <canvas id="overlayCanvas"></canvas>
+
+        <!-- Edit Mode Controls -->
+        <div id="editControls" class="controls">
+            <div class="control-panel top">
+                <button id="addTriangleBtn" class="tool-btn" title="Add Triangle">△</button>
+                <button id="addSquareBtn" class="tool-btn" title="Add Square">□</button>
+                <button id="drawPolygonBtn" class="tool-btn" title="Draw Custom Polygon">✎</button>
+                <button id="selectBtn" class="tool-btn active" title="Select/Move">⊕</button>
+                <div class="divider"></div>
+                <button id="deleteBtn" class="tool-btn danger" title="Delete Selected">🗑</button>
+                <button id="changeContentBtn" class="tool-btn" title="Change Content">🎨</button>
+            </div>
+
+            <div class="control-panel bottom-right">
+                <button id="performanceBtn" class="mode-btn">Performance Mode</button>
+                <button id="fullscreenBtn" class="mode-btn">Fullscreen</button>
+                <button id="saveBtn" class="mode-btn">Save Project</button>
+                <button id="loadBtn" class="mode-btn">Load Project</button>
+            </div>
+        </div>
+
+        <!-- Fine-tune vertex controls (shown when vertex selected) -->
+        <div id="vertexControls" class="vertex-controls hidden">
+            <button class="arrow-btn" data-dir="up">↑</button>
+            <div class="arrow-row">
+                <button class="arrow-btn" data-dir="left">←</button>
+                <button class="arrow-btn" data-dir="down">↓</button>
+                <button class="arrow-btn" data-dir="right">→</button>
+            </div>
+            <div class="fine-tune-label">Fine Tune (1px)</div>
+        </div>
+
+        <!-- Content Selection Modal -->
+        <div id="contentModal" class="modal hidden">
+            <div class="modal-content">
+                <h2>Select Content Type</h2>
+                <button class="content-type-btn" data-type="shader">Shader</button>
+                <button class="content-type-btn" data-type="video">Video</button>
+                <button class="close-modal">Cancel</button>
+            </div>
+        </div>
+
+        <!-- Shader Selection Modal -->
+        <div id="shaderModal" class="modal hidden">
+            <div class="modal-content">
+                <h2>Select Shader</h2>
+                <div id="shaderList" class="shader-list">
+                    <button class="shader-btn" data-shader="rainbow">Rainbow</button>
+                    <button class="shader-btn" data-shader="plasma">Plasma</button>
+                    <button class="shader-btn" data-shader="waves">Waves</button>
+                    <button class="shader-btn" data-shader="checkerboard">Checkerboard</button>
+                    <button class="shader-btn" data-shader="solid">Solid Color</button>
+                </div>
+                <button class="close-modal">Back</button>
+            </div>
+        </div>
+
+        <!-- Video Selection Modal -->
+        <div id="videoModal" class="modal hidden">
+            <div class="modal-content">
+                <h2>Select Video</h2>
+                <input type="file" id="videoFileInput" accept="video/*" />
+                <div id="videoList" class="video-list">
+                    <!-- Loaded videos will appear here -->
+                </div>
+                <button class="close-modal">Back</button>
+            </div>
+        </div>
+
+        <!-- Performance Mode Overlay -->
+        <div id="performanceOverlay" class="hidden"></div>
+
+        <!-- Status Message -->
+        <div id="statusMsg" class="status-msg hidden"></div>
+    </div>
+
+    <script src="shaders.js"></script>
+    <script src="polygon.js"></script>
+    <script src="renderer.js"></script>
+    <script src="app.js"></script>
+
+    <script>
+        // Register service worker for offline support
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js')
+                .then(reg => console.log('Service Worker registered'))
+                .catch(err => console.log('Service Worker registration failed'));
+        }
+    </script>
+</body>
+</html>
