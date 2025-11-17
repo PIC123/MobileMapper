@@ -14,6 +14,7 @@ class Renderer {
 
         this.programs = {};
         this.startTime = Date.now();
+        this.videoTextures = new Map(); // Cache video textures
         this.setupShaders();
 
         // Resize canvas to match display size
@@ -187,8 +188,14 @@ class Renderer {
 
         // Set uniforms
         if (polygon.contentType === 'video' && polygon.videoElement) {
-            // Video texture
-            const texture = gl.createTexture();
+            // Get or create texture for this polygon
+            let texture = this.videoTextures.get(polygon.id);
+            if (!texture) {
+                texture = gl.createTexture();
+                this.videoTextures.set(polygon.id, texture);
+            }
+
+            gl.activeTexture(gl.TEXTURE0);
             gl.bindTexture(gl.TEXTURE_2D, texture);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);

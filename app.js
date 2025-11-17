@@ -192,6 +192,7 @@ class MobileMapperApp {
                 if (vertexIndex >= 0) {
                     this.selectPolygon(poly);
                     this.selectedVertex = vertexIndex;
+                    this.updateVertexControls(true);
                     foundVertex = true;
                     break;
                 }
@@ -204,6 +205,8 @@ class MobileMapperApp {
                     const poly = this.polygons[i];
                     if (poly.containsPoint(coords.x, coords.y)) {
                         this.selectPolygon(poly);
+                        this.selectedVertex = -1;
+                        this.updateVertexControls(false);
                         this.dragStart = coords;
                         foundPolygon = true;
                         break;
@@ -211,7 +214,10 @@ class MobileMapperApp {
                 }
 
                 if (!foundPolygon) {
+                    // Clicked on blank area - deselect everything
                     this.selectPolygon(null);
+                    this.selectedVertex = -1;
+                    this.updateVertexControls(false);
                 }
             }
         }
@@ -233,8 +239,11 @@ class MobileMapperApp {
     }
 
     handlePointerUp() {
-        this.selectedVertex = -1;
-        this.dragStart = null;
+        // Only hide vertex controls if we were dragging, not if selecting
+        if (this.dragStart) {
+            this.dragStart = null;
+        }
+        // Keep vertex selected after dragging it
     }
 
     finishDrawing() {
@@ -252,10 +261,15 @@ class MobileMapperApp {
         this.polygons.forEach(p => p.selected = false);
         this.selectedPolygon = poly;
         if (poly) poly.selected = true;
+    }
 
-        // Show/hide vertex controls
+    updateVertexControls(show) {
         const vertexControls = document.getElementById('vertexControls');
-        vertexControls.classList.toggle('hidden', this.selectedVertex < 0);
+        if (show && this.selectedVertex >= 0) {
+            vertexControls.classList.remove('hidden');
+        } else {
+            vertexControls.classList.add('hidden');
+        }
     }
 
     finetuneVertex(direction) {
@@ -445,15 +459,27 @@ class MobileMapperApp {
                     this.overlayCtx.stroke();
 
                     // Draw vertices
-                    poly.vertices.forEach(v => {
+                    poly.vertices.forEach((v, idx) => {
                         const x = v.x * w;
                         const y = v.y * h;
-                        this.overlayCtx.fillStyle = '#00ff00';
+
+                        // Highlight selected vertex in cyan
+                        const isSelected = idx === this.selectedVertex;
+
+                        if (isSelected) {
+                            // Draw larger glow for selected vertex
+                            this.overlayCtx.fillStyle = 'rgba(0, 255, 255, 0.3)';
+                            this.overlayCtx.beginPath();
+                            this.overlayCtx.arc(x, y, 12, 0, Math.PI * 2);
+                            this.overlayCtx.fill();
+                        }
+
+                        this.overlayCtx.fillStyle = isSelected ? '#00ffff' : '#00ff00';
                         this.overlayCtx.beginPath();
-                        this.overlayCtx.arc(x, y, 6, 0, Math.PI * 2);
+                        this.overlayCtx.arc(x, y, isSelected ? 8 : 6, 0, Math.PI * 2);
                         this.overlayCtx.fill();
                         this.overlayCtx.strokeStyle = '#000000';
-                        this.overlayCtx.lineWidth = 1;
+                        this.overlayCtx.lineWidth = 2;
                         this.overlayCtx.stroke();
                     });
                 }
