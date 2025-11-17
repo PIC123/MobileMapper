@@ -22,8 +22,8 @@ class MobileMapperApp {
         window.addEventListener('resize', () => this.resizeOverlay());
         this.animate();
 
-        // Load saved project if exists
-        this.loadProject();
+        // Show welcome modal
+        this.showWelcomeModal();
     }
 
     resizeOverlay() {
@@ -109,6 +109,11 @@ class MobileMapperApp {
 
         document.addEventListener('mouseup', () => this.stopControlsDrag());
         document.addEventListener('touchend', () => this.stopControlsDrag());
+
+        // Welcome modal buttons
+        document.getElementById('newProjectBtn').addEventListener('click', () => this.startNewProject());
+        document.getElementById('loadProjectFileBtn').addEventListener('click', () => this.loadProjectFromFile());
+        document.getElementById('continueProjectBtn').addEventListener('click', () => this.continueLastProject());
     }
 
     startControlsDrag(e) {
@@ -432,53 +437,113 @@ class MobileMapperApp {
         }
     }
 
+    // Welcome Modal
+    showWelcomeModal() {
+        const welcomeModal = document.getElementById('welcomeModal');
+        const continueBtn = document.getElementById('continueProjectBtn');
+
+        // Check if there's a saved project in localStorage
+        const hasSavedProject = localStorage.getItem('mobileMapperProject') !== null;
+        continueBtn.disabled = !hasSavedProject;
+
+        welcomeModal.classList.remove('hidden');
+    }
+
+    startNewProject() {
+        this.polygons = [];
+        this.loadedVideos.clear();
+        this.selectedPolygon = null;
+        this.selectedVertex = -1;
+        localStorage.removeItem('mobileMapperProject');
+        document.getElementById('welcomeModal').classList.add('hidden');
+        this.showStatus('New project started');
+    }
+
+    continueLastProject() {
+        this.loadProjectFromLocalStorage();
+        document.getElementById('welcomeModal').classList.add('hidden');
+        this.showStatus('Project loaded from last session');
+    }
+
+    loadProjectFromFile() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const data = JSON.parse(event.target.result);
+                    this.loadProjectData(data);
+                    document.getElementById('welcomeModal').classList.add('hidden');
+                    this.showStatus('Project loaded from file!');
+                } catch (e) {
+                    this.showStatus('Failed to load project file');
+                    console.error(e);
+                }
+            };
+            reader.readAsText(file);
+        };
+        input.click();
+    }
+
     // Save/Load
     saveProject() {
         const data = {
             polygons: this.polygons.map(p => p.toJSON()),
-            videos: Array.from(this.loadedVideos.entries())
+            videos: Array.from(this.loadedVideos.entries()),
+            version: '1.0'
         };
+
+        // Save to localStorage
         localStorage.setItem('mobileMapperProject', JSON.stringify(data));
-        this.showStatus('Project saved!');
+
+        // Download as file
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `mobile-mapper-project-${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+
+        this.showStatus('Project saved and downloaded!');
     }
 
-    loadProject() {
+    loadProjectFromLocalStorage() {
         const saved = localStorage.getItem('mobileMapperProject');
         if (saved) {
             try {
                 const data = JSON.parse(saved);
-                this.polygons = data.polygons.map(p => Polygon.fromJSON(p));
-                if (data.videos) {
-                    this.loadedVideos = new Map(data.videos);
-                }
+                this.loadProjectData(data);
             } catch (e) {
                 console.error('Failed to load project:', e);
             }
         }
     }
 
-    loadProjectDialog() {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.json';
-        input.onchange = (e) => {
-            const file = e.target.files[0];
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                try {
-                    const data = JSON.parse(event.target.result);
-                    this.polygons = data.polygons.map(p => Polygon.fromJSON(p));
-                    if (data.videos) {
-                        this.loadedVideos = new Map(data.videos);
-                    }
-                    this.showStatus('Project loaded!');
-                } catch (e) {
-                    this.showStatus('Failed to load project file');
+    loadProjectData(data) {
+        // Load polygons
+        this.polygons = data.polygons.map(p => Polygon.fromJSON(p));
+
+        // Load videos - need to recreate blob URLs
+        if (data.videos) {
+            this.loadedVideos = new Map(data.videos);
+
+            // Trigger video reloading for polygons with video content
+            this.polygons.forEach(poly => {
+                if (poly.contentType === 'video' && poly.videoSrc) {
+                    poly.loadVideo();
                 }
-            };
-            reader.readAsText(file);
-        };
-        input.click();
+            });
+        }
+    }
+
+    loadProjectDialog() {
+        this.loadProjectFromFile();
     }
 
     showStatus(message) {
