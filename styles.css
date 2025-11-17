@@ -131,11 +131,10 @@ button:active {
 
 /* Vertex Controls */
 .vertex-controls {
-    position: absolute;
+    position: fixed;
     bottom: 80px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(0, 0, 0, 0.85);
+    right: 20px;
+    background: rgba(0, 0, 0, 0.9);
     backdrop-filter: blur(10px);
     padding: 15px;
     border-radius: 12px;
@@ -144,10 +143,32 @@ button:active {
     align-items: center;
     gap: 8px;
     pointer-events: auto;
+    cursor: move;
+    touch-action: none;
+    z-index: 100;
+    border: 2px solid rgba(0, 255, 255, 0.5);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
 .vertex-controls.hidden {
     display: none;
+}
+
+.control-drag-handle {
+    width: 100%;
+    text-align: center;
+    color: rgba(0, 255, 255, 0.7);
+    font-size: 16px;
+    letter-spacing: 4px;
+    margin-bottom: 8px;
+    padding: 4px;
+    cursor: grab;
+    user-select: none;
+    border-bottom: 1px solid rgba(0, 255, 255, 0.3);
+}
+
+.control-drag-handle:active {
+    cursor: grabbing;
 }
 
 .arrow-row {

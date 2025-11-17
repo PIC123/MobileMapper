@@ -14,6 +14,8 @@ class MobileMapperApp {
         this.dragStart = null;
         this.editMode = true;
         this.loadedVideos = new Map(); // Store loaded videos
+        this.controlsDragStart = null;
+        this.controlsPosition = { x: null, y: null }; // Will use CSS default initially
 
         this.setupEventListeners();
         this.resizeOverlay();
@@ -94,6 +96,64 @@ class MobileMapperApp {
             e.preventDefault();
             this.togglePerformanceMode();
         }, { passive: false });
+
+        // Draggable vertex controls
+        const vertexControls = document.getElementById('vertexControls');
+        const dragHandle = vertexControls.querySelector('.control-drag-handle');
+
+        dragHandle.addEventListener('mousedown', (e) => this.startControlsDrag(e));
+        dragHandle.addEventListener('touchstart', (e) => this.startControlsDrag(e), { passive: false });
+
+        document.addEventListener('mousemove', (e) => this.moveControls(e));
+        document.addEventListener('touchmove', (e) => this.moveControls(e), { passive: false });
+
+        document.addEventListener('mouseup', () => this.stopControlsDrag());
+        document.addEventListener('touchend', () => this.stopControlsDrag());
+    }
+
+    startControlsDrag(e) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const vertexControls = document.getElementById('vertexControls');
+        const rect = vertexControls.getBoundingClientRect();
+
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+        this.controlsDragStart = {
+            x: clientX - rect.left,
+            y: clientY - rect.top
+        };
+    }
+
+    moveControls(e) {
+        if (!this.controlsDragStart) return;
+
+        e.preventDefault();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+        const vertexControls = document.getElementById('vertexControls');
+
+        const newX = clientX - this.controlsDragStart.x;
+        const newY = clientY - this.controlsDragStart.y;
+
+        // Keep within viewport bounds
+        const maxX = window.innerWidth - vertexControls.offsetWidth;
+        const maxY = window.innerHeight - vertexControls.offsetHeight;
+
+        this.controlsPosition.x = Math.max(0, Math.min(newX, maxX));
+        this.controlsPosition.y = Math.max(0, Math.min(newY, maxY));
+
+        vertexControls.style.left = this.controlsPosition.x + 'px';
+        vertexControls.style.top = this.controlsPosition.y + 'px';
+        vertexControls.style.right = 'auto';
+        vertexControls.style.bottom = 'auto';
+    }
+
+    stopControlsDrag() {
+        this.controlsDragStart = null;
     }
 
     setTool(tool) {
