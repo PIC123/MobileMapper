@@ -492,10 +492,26 @@ class MobileMapperApp {
 
     // Save/Load
     saveProject() {
+        // Prompt for filename
+        const defaultName = `projection-mapping-${new Date().toISOString().split('T')[0]}`;
+        let filename = prompt('Enter project name:', defaultName);
+
+        // Cancel if user clicks cancel
+        if (filename === null) {
+            return;
+        }
+
+        // Clean filename and add extension if missing
+        filename = filename.trim() || defaultName;
+        if (!filename.endsWith('.json')) {
+            filename += '.json';
+        }
+
         const data = {
             polygons: this.polygons.map(p => p.toJSON()),
             videos: Array.from(this.loadedVideos.entries()),
-            version: '1.0'
+            version: '1.0',
+            name: filename.replace('.json', '')
         };
 
         // Save to localStorage
@@ -506,11 +522,11 @@ class MobileMapperApp {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `mobile-mapper-project-${Date.now()}.json`;
+        a.download = filename;
         a.click();
         URL.revokeObjectURL(url);
 
-        this.showStatus('Project saved and downloaded!');
+        this.showStatus(`Project "${filename}" saved!`);
     }
 
     loadProjectFromLocalStorage() {
@@ -533,10 +549,30 @@ class MobileMapperApp {
         if (data.videos) {
             this.loadedVideos = new Map(data.videos);
 
-            // Trigger video reloading for polygons with video content
+            // Check which polygons have video content and if the video exists
             this.polygons.forEach(poly => {
-                if (poly.contentType === 'video' && poly.videoSrc) {
-                    poly.loadVideo();
+                if (poly.contentType === 'video') {
+                    if (poly.videoSrc && this.loadedVideos.has(poly.videoSrc)) {
+                        // Video exists, try to load it
+                        poly.loadVideo();
+                    } else {
+                        // Video missing, default to shader
+                        console.warn(`Video not found for polygon ${poly.id}, defaulting to shader`);
+                        poly.contentType = 'shader';
+                        poly.shaderType = 'rainbow';
+                        poly.videoSrc = null;
+                        poly.videoElement = null;
+                    }
+                }
+            });
+        } else {
+            // No videos in save file, convert any video polygons to shaders
+            this.polygons.forEach(poly => {
+                if (poly.contentType === 'video') {
+                    poly.contentType = 'shader';
+                    poly.shaderType = 'rainbow';
+                    poly.videoSrc = null;
+                    poly.videoElement = null;
                 }
             });
         }
