@@ -175,7 +175,7 @@ class Renderer {
     isEar(prev, curr, next, allVertices, availableIndices) {
         // Check if angle at curr is convex
         const cross = (next.x - curr.x) * (prev.y - curr.y) - (next.y - curr.y) * (prev.x - curr.x);
-        if (cross <= 0) return false; // Concave or collinear
+        if (cross >= 0) return false; // Concave or collinear (flipped for clockwise winding)
 
         // Check if any other vertex is inside this triangle
         for (let idx of availableIndices) {
