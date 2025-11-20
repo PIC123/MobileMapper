@@ -125,14 +125,29 @@ class Renderer {
         };
     }
 
+    // Detect polygon winding order (true = counter-clockwise, false = clockwise)
+    isCounterClockwise(vertices) {
+        let area = 0;
+        for (let i = 0; i < vertices.length; i++) {
+            const j = (i + 1) % vertices.length;
+            area += vertices[i].x * vertices[j].y;
+            area -= vertices[j].x * vertices[i].y;
+        }
+        return area > 0;
+    }
+
     // Ear clipping triangulation for concave polygons
     triangulatePolygon(vertices) {
         // Returns array of triangle indices
         if (vertices.length < 3) return [];
         if (vertices.length === 3) return [0, 1, 2];
 
+        // Ensure vertices are in counter-clockwise order
+        const isCCW = this.isCounterClockwise(vertices);
+        const workingVertices = isCCW ? vertices : vertices.slice().reverse();
+
         const indices = [];
-        const availableIndices = vertices.map((_, i) => i);
+        const availableIndices = workingVertices.map((_, i) => i);
 
         while (availableIndices.length > 3) {
             let earFound = false;
@@ -142,12 +157,12 @@ class Renderer {
                 const currIdx = availableIndices[i];
                 const nextIdx = availableIndices[(i + 1) % availableIndices.length];
 
-                const prev = vertices[prevIdx];
-                const curr = vertices[currIdx];
-                const next = vertices[nextIdx];
+                const prev = workingVertices[prevIdx];
+                const curr = workingVertices[currIdx];
+                const next = workingVertices[nextIdx];
 
                 // Check if this is an ear
-                if (this.isEar(prev, curr, next, vertices, availableIndices)) {
+                if (this.isEar(prev, curr, next, workingVertices, availableIndices)) {
                     // Add triangle
                     indices.push(prevIdx, currIdx, nextIdx);
                     // Remove current vertex
@@ -169,13 +184,19 @@ class Renderer {
             indices.push(availableIndices[0], availableIndices[1], availableIndices[2]);
         }
 
+        // Map indices back to original vertex order if we reversed them
+        if (!isCCW) {
+            const n = vertices.length;
+            return indices.map(idx => n - 1 - idx);
+        }
+
         return indices;
     }
 
     isEar(prev, curr, next, allVertices, availableIndices) {
-        // Check if angle at curr is convex
+        // Check if angle at curr is convex (assuming CCW winding)
         const cross = (next.x - curr.x) * (prev.y - curr.y) - (next.y - curr.y) * (prev.x - curr.x);
-        if (cross >= 0) return false; // Concave or collinear (flipped for clockwise winding)
+        if (cross <= 0) return false; // Concave or collinear
 
         // Check if any other vertex is inside this triangle
         for (let idx of availableIndices) {
