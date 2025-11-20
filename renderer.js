@@ -125,6 +125,86 @@ class Renderer {
         };
     }
 
+    // Ear clipping triangulation for concave polygons
+    triangulatePolygon(vertices) {
+        // Returns array of triangle indices
+        if (vertices.length < 3) return [];
+        if (vertices.length === 3) return [0, 1, 2];
+
+        const indices = [];
+        const availableIndices = vertices.map((_, i) => i);
+
+        while (availableIndices.length > 3) {
+            let earFound = false;
+
+            for (let i = 0; i < availableIndices.length; i++) {
+                const prevIdx = availableIndices[(i - 1 + availableIndices.length) % availableIndices.length];
+                const currIdx = availableIndices[i];
+                const nextIdx = availableIndices[(i + 1) % availableIndices.length];
+
+                const prev = vertices[prevIdx];
+                const curr = vertices[currIdx];
+                const next = vertices[nextIdx];
+
+                // Check if this is an ear
+                if (this.isEar(prev, curr, next, vertices, availableIndices)) {
+                    // Add triangle
+                    indices.push(prevIdx, currIdx, nextIdx);
+                    // Remove current vertex
+                    availableIndices.splice(i, 1);
+                    earFound = true;
+                    break;
+                }
+            }
+
+            // Fallback if no ear found (shouldn't happen with valid polygons)
+            if (!earFound) {
+                console.warn('No ear found, using fallback triangulation');
+                break;
+            }
+        }
+
+        // Add final triangle
+        if (availableIndices.length === 3) {
+            indices.push(availableIndices[0], availableIndices[1], availableIndices[2]);
+        }
+
+        return indices;
+    }
+
+    isEar(prev, curr, next, allVertices, availableIndices) {
+        // Check if angle at curr is convex
+        const cross = (next.x - curr.x) * (prev.y - curr.y) - (next.y - curr.y) * (prev.x - curr.x);
+        if (cross <= 0) return false; // Concave or collinear
+
+        // Check if any other vertex is inside this triangle
+        for (let idx of availableIndices) {
+            const v = allVertices[idx];
+            if (v === prev || v === curr || v === next) continue;
+
+            if (this.isPointInTriangle(v, prev, curr, next)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    isPointInTriangle(p, a, b, c) {
+        const sign = (p1, p2, p3) => {
+            return (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y);
+        };
+
+        const d1 = sign(p, a, b);
+        const d2 = sign(p, b, c);
+        const d3 = sign(p, c, a);
+
+        const hasNeg = (d1 < 0) || (d2 < 0) || (d3 < 0);
+        const hasPos = (d1 > 0) || (d2 > 0) || (d3 > 0);
+
+        return !(hasNeg && hasPos);
+    }
+
     // Render a single polygon
     renderPolygon(polygon) {
         const gl = this.gl;
@@ -148,27 +228,24 @@ class Renderer {
         // Calculate bounding box for UV mapping
         const bounds = polygon.getBoundingBox();
 
-        // Triangulate polygon (simple fan triangulation)
+        // Triangulate polygon using ear clipping (handles concave polygons)
+        const triangleIndices = this.triangulatePolygon(polygon.vertices);
         const positions = [];
         const texCoords = [];
 
-        for (let i = 1; i < clipVertices.length - 1; i++) {
-            positions.push(clipVertices[0].x, clipVertices[0].y);
-            positions.push(clipVertices[i].x, clipVertices[i].y);
-            positions.push(clipVertices[i + 1].x, clipVertices[i + 1].y);
+        // Build position and texture coordinate arrays from triangle indices
+        for (let i = 0; i < triangleIndices.length; i++) {
+            const idx = triangleIndices[i];
+            const vertex = polygon.vertices[idx];
+            const clipVertex = clipVertices[idx];
+
+            // Add position in clip space
+            positions.push(clipVertex.x, clipVertex.y);
 
             // Map texture coordinates to polygon's bounding box
             texCoords.push(
-                (polygon.vertices[0].x - bounds.minX) / bounds.width,
-                (polygon.vertices[0].y - bounds.minY) / bounds.height
-            );
-            texCoords.push(
-                (polygon.vertices[i].x - bounds.minX) / bounds.width,
-                (polygon.vertices[i].y - bounds.minY) / bounds.height
-            );
-            texCoords.push(
-                (polygon.vertices[i + 1].x - bounds.minX) / bounds.width,
-                (polygon.vertices[i + 1].y - bounds.minY) / bounds.height
+                (vertex.x - bounds.minX) / bounds.width,
+                (vertex.y - bounds.minY) / bounds.height
             );
         }
 
