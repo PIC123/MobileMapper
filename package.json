@@ -1,0 +1,21 @@
+{
+  "name": "mobilemapper",
+  "version": "1.0.0",
+  "description": "A lightweight web-based projection mapping application designed for mobile phones and portable projectors. Create and perform projection mapping on the go without requiring an internet connection.",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/earcut": "^3.0.0",
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3",
+    "vite": "^5.4.21"
+  },
+  "dependencies": {
+    "earcut": "^3.0.2"
+  }
+}

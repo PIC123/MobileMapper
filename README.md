@@ -33,11 +33,13 @@ A lightweight web-based projection mapping application designed for mobile phone
 ### Creating Shapes
 
 **Quick Shapes:**
+
 - Tap the **△** button to add a triangle
 - Tap the **□** button to add a square
 - Shapes appear at the center of your tap
 
 **Custom Polygons:**
+
 1. Tap the **✎** (draw) button
 2. Tap to place vertices (minimum 3 points)
 3. Tap the last vertex again or switch tools to finish
@@ -45,12 +47,14 @@ A lightweight web-based projection mapping application designed for mobile phone
 ### Editing Shapes
 
 **Select Mode (⊕):**
+
 - Tap a shape to select it (turns green)
 - Drag vertices to reposition them
 - Drag the shape body to move entire shape
 - Use arrow buttons for pixel-perfect adjustments
 
 **Delete:**
+
 - Select a shape
 - Tap the **🗑** (trash) button
 
@@ -77,10 +81,12 @@ A lightweight web-based projection mapping application designed for mobile phone
 ### Saving Your Work
 
 **Auto-Save:**
+
 - Projects auto-save to browser local storage
 - Automatically loads on next visit
 
 **Manual Save:**
+
 - Tap **Save Project** to save current state
 - Tap **Load Project** to import a saved .json file
 
@@ -140,21 +146,25 @@ To modify or extend:
 ## Troubleshooting
 
 **App won't load:**
+
 - Check if WebGL is supported: visit https://get.webgl.org/
 - Try a different browser
 - Clear cache and reload
 
 **Videos won't play:**
+
 - Use H.264 encoded MP4 files
 - Keep files under 50MB for mobile performance
 - Enable autoplay in browser settings
 
 **Touch not working:**
+
 - Ensure not in desktop mode
 - Try refreshing the page
 - Check touch sensitivity in device settings
 
 **Performance issues:**
+
 - Reduce number of polygons
 - Use shaders instead of videos
 - Close other apps
