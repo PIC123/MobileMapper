@@ -1,322 +1,225 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
-    />
-    <title>Mobile Mapper V2</title>
-    <!-- <link rel="stylesheet" href="styles.css" /> -->
-    <link rel="manifest" href="manifest.json" />
-  </head>
-  <body>
-    <div id="canvasContainer">
-      <canvas id="mainCanvas"></canvas>
-      <canvas id="overlayCanvas"></canvas>
-    </div>
-
-    <!-- Independent Toggle Button -->
-    <button id="toggleSidebarBtn" class="tool-btn" title="Toggle Menu">
-      ☰
-    </button>
-
-    <!-- UI Container -->
-    <div id="uiContainer" class="ui-container">
-      <!-- Top Bar -->
-      <div class="top-bar">
-        <div class="app-logo"><span>⬡</span> MobileMapper</div>
-        <div class="top-controls">
-          <!-- Audio Toggle -->
-          <button
-            id="audioToggleBtn"
-            class="mode-btn"
-            title="Toggle Audio Reactivity"
-          >
-            🎤
-          </button>
-          <button
-            id="performanceBtn"
-            class="mode-btn"
-            title="Performance Mode (Hide UI)"
-          >
-            🎭
-          </button>
-          <button id="fullscreenBtn" class="mode-btn" title="Fullscreen">
-            ⛶
-          </button>
-          <button id="saveBtn" class="action-btn" title="Save Project">
-            💾
-          </button>
-          <button id="loadBtn" class="action-btn" title="Load Project">
-            📂
-          </button>
-        </div>
-      </div>
-
-      <!-- Left Sidebar (Shapes & Tools & Layers) -->
-      <div id="leftSidebar" class="sidebar left-sidebar">
-        <div class="sidebar-section">
-          <h3>Add Shape</h3>
-          <div class="tool-grid">
-            <button id="addTriangleBtn" class="tool-btn" title="Triangle">
-              ▲
-            </button>
-            <button id="addSquareBtn" class="tool-btn" title="Square">■</button>
-            <button id="addCircleBtn" class="tool-btn" title="Circle">●</button>
-            <button id="drawPolygonBtn" class="tool-btn" title="Draw Polygon">
-              ✏️
-            </button>
-          </div>
-        </div>
-
-        <div class="sidebar-section">
-          <h3>Tools</h3>
-          <div class="tool-grid">
-            <button id="selectBtn" class="tool-btn active" title="Select">
-              👆
-            </button>
-            <button id="deleteBtn" class="tool-btn" title="Delete Selected">
-              🗑️
-            </button>
-          </div>
-        </div>
-
-        <!-- Layers Panel -->
-        <div class="sidebar-section">
-          <h3>Layers</h3>
-          <div id="layersListContainer" class="layers-list">
-            <!-- Dynamic Layers -->
-          </div>
-        </div>
-      </div>
-
-      <!-- Right Sidebar (Properties & Effects) -->
-      <div id="rightSidebar" class="sidebar right-sidebar hidden">
-        <div class="sidebar-section">
-          <h3>Content</h3>
-          <button id="changeContentBtn" class="action-btn" style="width: 100%">
-            Change Content
-          </button>
-          <div
-            id="currentContentInfo"
-            class="info-display"
-            style="font-size: 12px; margin-top: 8px; opacity: 0.7"
-          >
-            Shader: Rainbow
-          </div>
-        </div>
-
-        <div class="sidebar-section">
-          <h3>Warping</h3>
-          <div class="toggle-row">
-            <span style="font-size: 12px">Mesh Warp</span>
-            <label class="toggle-switch">
-              <input type="checkbox" id="warpToggle" />
-              <span class="slider"></span>
-            </label>
-          </div>
-        </div>
-
-        <!-- Audio Reactivity Settings -->
-        <div class="sidebar-section">
-          <h3>Audio Reactivity</h3>
-          <div class="toggle-row">
-            <span style="font-size: 12px">Enable Audio</span>
-            <label class="toggle-switch">
-              <input type="checkbox" id="audioEnabledToggle" />
-              <span class="slider"></span>
-            </label>
-          </div>
-          <div class="control-group">
-            <label>Gain (Strength)</label>
-            <input
-              type="range"
-              id="audioGainSlider"
-              min="0"
-              max="5"
-              step="0.1"
-              value="1"
-            />
-          </div>
-          <div class="control-group">
-            <label>Bass Influence</label>
-            <input
-              type="range"
-              id="audioBassSlider"
-              min="0"
-              max="2"
-              step="0.1"
-              value="1"
-            />
-          </div>
-          <div class="control-group">
-            <label>Mid Influence</label>
-            <input
-              type="range"
-              id="audioMidSlider"
-              min="0"
-              max="2"
-              step="0.1"
-              value="1"
-            />
-          </div>
-          <div class="control-group">
-            <label>High Influence</label>
-            <input
-              type="range"
-              id="audioHighSlider"
-              min="0"
-              max="2"
-              step="0.1"
-              value="1"
-            />
-          </div>
-        </div>
-
-        <div class="sidebar-section">
-          <h3>Effects Stack</h3>
-          <div class="control-group">
-            <select id="effectTypeSelect" class="dropdown">
-              <option value="brightness">Brightness</option>
-              <option value="contrast">Contrast</option>
-              <option value="saturation">Saturation</option>
-              <option value="hue">Hue Shift</option>
-              <option value="border">Border</option>
-              <option value="scanlines">Scanlines</option>
-              <option value="dots">Dots Pattern</option>
-              <option value="grid">Grid Pattern</option>
-            </select>
-            <button id="addEffectBtn" class="add-btn">+ Add Effect</button>
-          </div>
-          <div id="effectsListContainer" class="effects-list">
-            <!-- Dynamic Effects Go Here -->
-          </div>
-        </div>
-      </div>
-
-      <!-- Vertex Fine Tune Controls (Floating) -->
-      <div id="vertexControls" class="vertex-controls hidden">
-        <div class="control-drag-handle"></div>
-        <div class="control-pad">
-          <div></div>
-          <button class="arrow-btn" data-dir="up">▲</button>
-          <div></div>
-          <button class="arrow-btn" data-dir="left">◀</button>
-          <div
-            style="
-              width: 30px;
-              height: 30px;
-              background: rgba(255, 255, 255, 0.1);
-              border-radius: 50%;
-            "
-          ></div>
-          <button class="arrow-btn" data-dir="right">▶</button>
-          <div></div>
-          <button class="arrow-btn" data-dir="down">▼</button>
-          <div></div>
-        </div>
-        <div class="fine-tune-label">Fine Tune</div>
-        <button
-          id="toggleCurveBtn"
-          class="mode-btn"
-          style="margin-top: 8px; font-size: 10px; padding: 6px 12px"
-        >
-          Toggle Curve
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-fullscreen">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>Mobile Mapper - Projection Mapping</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Main Canvas -->
+        <canvas id="mainCanvas"></canvas>
+        <canvas id="overlayCanvas"></canvas>
+        
+        <!-- Toggle Sidebar Button (Fixed Position) -->
+        <button id="toggleSidebarBtn" class="toggle-sidebar-btn">
+            <span class="icon">☰</span>
         </button>
-      </div>
-    </div>
 
-    <!-- Performance Mode Overlay (Click to exit) -->
-    <div id="performanceOverlay" class="hidden"></div>
+        <!-- Left Sidebar (Tools & Layers) -->
+        <div id="leftSidebar" class="sidebar left-sidebar">
+            <!-- Tools Section -->
+            <div class="sidebar-section">
+                <h3>Tools</h3>
+                <div class="tool-grid">
+                    <button id="addTriangleBtn" class="tool-btn" title="Add Triangle">△</button>
+                    <button id="addSquareBtn" class="tool-btn" title="Add Square">□</button>
+                    <button id="addCircleBtn" class="tool-btn" title="Add Circle">○</button>
+                    <button id="drawPolygonBtn" class="tool-btn" title="Draw Polygon">⬠</button>
+                    <button id="addCanvasBtn" class="tool-btn" title="Add Drawing Canvas">🖌️</button>
+                    <button id="selectBtn" class="tool-btn active" title="Select/Move">⊕</button>
+                    <button id="brushBtn" class="tool-btn" title="Brush Tool">✏️</button>
+                    <button id="deleteBtn" class="tool-btn danger" title="Delete Selected">🗑</button>
+                </div>
+            </div>
 
-    <!-- Modals -->
-    <div id="contentModal" class="modal hidden">
-      <div class="modal-content">
-        <h2>Select Content Type</h2>
-        <button
-          class="content-type-btn"
-          data-type="shader"
-          style="margin-bottom: 8px; width: 100%"
-        >
-          Shader
-        </button>
-        <button class="content-type-btn" data-type="video" style="width: 100%">
-          Video
-        </button>
-        <button class="close-modal" style="margin-top: 16px">Cancel</button>
-      </div>
-    </div>
+            <!-- Brush Controls (Contextual) -->
+            <div id="brushControls" class="sidebar-section hidden">
+                <h3>Brush Settings</h3>
+                <div class="control-group">
+                    <label>Size: <span id="brushSizeVal">5</span></label>
+                    <input type="range" id="brushSizeSlider" min="1" max="50" value="5">
+                </div>
+                <div class="control-group">
+                    <label>Opacity: <span id="brushOpacityVal">1.0</span></label>
+                    <input type="range" id="brushOpacitySlider" min="0.1" max="1.0" step="0.1" value="1.0">
+                </div>
+                <div class="control-group">
+                    <label>Color</label>
+                    <input type="color" id="brushColorPicker" value="#ffffff" style="width:100%;">
+                </div>
+                <div class="control-group row">
+                    <label>Eraser</label>
+                    <input type="checkbox" id="eraserToggle">
+                </div>
+                <button id="clearCanvasBtn" class="action-btn full-width" style="margin-top:8px;">Clear Canvas</button>
+            </div>
 
-    <div id="shaderModal" class="modal hidden">
-      <div class="modal-content">
-        <h2>Select Shader</h2>
-        <div
-          id="shaderList"
-          class="shader-list"
-          style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px"
-        >
-          <button class="shader-btn" data-shader="rainbow">Rainbow</button>
-          <button class="shader-btn" data-shader="plasma">Plasma</button>
-          <button class="shader-btn" data-shader="waves">Waves</button>
-          <button class="shader-btn" data-shader="checkerboard">
-            Checkerboard
-          </button>
-          <button class="shader-btn" data-shader="grid">Grid</button>
-          <button class="shader-btn" data-shader="solid">Solid Color</button>
-          <!-- New Psychedelic Shaders -->
-          <button class="shader-btn" data-shader="kaleidoscope">
-            Kaleidoscope
-          </button>
-          <button class="shader-btn" data-shader="fractal">Fractal</button>
+            <!-- Layers List -->
+            <div class="sidebar-section">
+                <h3>Layers</h3>
+                <div id="layersListContainer" class="layers-list">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
         </div>
-        <button class="close-modal" style="margin-top: 16px">Back</button>
-      </div>
-    </div>
 
-    <div id="videoModal" class="modal hidden">
-      <div class="modal-content">
-        <h2>Select Video</h2>
-        <input
-          type="file"
-          id="videoFileInput"
-          accept="video/*"
-          style="margin-bottom: 16px; color: white"
-        />
-        <div id="videoList" class="video-list">
-          <!-- Loaded videos will appear here -->
+        <!-- Right Sidebar (Properties & Effects) -->
+        <div id="rightSidebar" class="sidebar right-sidebar hidden">
+            <!-- Content & Mode -->
+            <div class="sidebar-section">
+                <h3>Properties</h3>
+                <div class="info-display" id="currentContentInfo">Shader: Rainbow</div>
+                <div style="margin-top: 8px; display: flex; gap: 8px;">
+                    <button id="changeContentBtn" class="action-btn flex-1">Change Content</button>
+                </div>
+                <div class="control-group row" style="margin-top: 12px;">
+                    <label>Warp Mode</label>
+                    <div class="toggle-switch">
+                        <input type="checkbox" id="warpToggle">
+                        <span class="slider"></span>
+                    </div>
+                </div>
+                <div class="control-group row" style="margin-top: 8px;">
+                    <label>Show Curve Controls</label>
+                    <button id="toggleCurveBtn" class="action-btn small">Toggle</button>
+                </div>
+                
+                <!-- Canvas Mask Option -->
+                <div id="canvasMaskControl" class="control-group row hidden" style="margin-top: 8px;">
+                    <label>Use as Mask</label>
+                    <input type="checkbox" id="useAsMaskToggle">
+                </div>
+            </div>
+
+            <!-- Audio Reactivity -->
+            <div class="sidebar-section">
+                <h3>Audio Reactivity</h3>
+                <div class="control-group row">
+                    <label>Enabled</label>
+                    <input type="checkbox" id="audioEnabledToggle">
+                </div>
+                <div class="control-group">
+                    <label>Gain</label>
+                    <input type="range" id="audioGainSlider" min="0" max="5" step="0.1" value="1">
+                </div>
+                <div class="control-group">
+                    <label>Bass Reactivity</label>
+                    <input type="range" id="audioBassSlider" min="0" max="5" step="0.1" value="1">
+                </div>
+                <div class="control-group">
+                    <label>Mid Reactivity</label>
+                    <input type="range" id="audioMidSlider" min="0" max="5" step="0.1" value="1">
+                </div>
+                <div class="control-group">
+                    <label>High Reactivity</label>
+                    <input type="range" id="audioHighSlider" min="0" max="5" step="0.1" value="1">
+                </div>
+            </div>
+
+            <!-- Effects -->
+            <div class="sidebar-section">
+                <h3>Effects</h3>
+                <div class="dropdown-container">
+                    <select id="effectTypeSelect" class="dropdown">
+                        <option value="brightness">Brightness</option>
+                        <option value="contrast">Contrast</option>
+                        <option value="saturation">Saturation</option>
+                        <option value="hue">Hue Shift</option>
+                        <option value="scanlines">Scanlines</option>
+                        <option value="dots">Dots Pattern</option>
+                        <option value="grid">Grid Pattern</option>
+                        <option value="border">Animated Border</option>
+                    </select>
+                    <button id="addEffectBtn" class="action-btn full-width">+ Add Effect</button>
+                </div>
+                <div id="effectsListContainer" class="effects-list">
+                    <!-- Effects populated here -->
+                </div>
+            </div>
         </div>
-        <button class="close-modal" style="margin-top: 16px">Back</button>
-      </div>
-    </div>
 
-    <!-- Welcome Modal -->
-    <div id="welcomeModal" class="modal hidden">
-      <div class="modal-content welcome-modal-content">
-        <h2>Mobile Mapper</h2>
-        <p class="welcome-subtitle" style="opacity: 0.7; margin-bottom: 24px">
-          Minimal Projection Tool
-        </p>
-        <div
-          class="welcome-buttons"
-          style="display: flex; flex-direction: column; gap: 12px"
-        >
-          <button id="newProjectBtn" class="welcome-btn">
-            <span class="btn-text">New Project</span>
-          </button>
-          <button id="loadProjectFileBtn" class="welcome-btn">
-            <span class="btn-text">Load from File</span>
-          </button>
-          <button id="continueProjectBtn" class="welcome-btn" disabled>
-            <span class="btn-text">Continue Last Session</span>
-          </button>
+        <!-- Top Bar (Global Controls) -->
+        <div id="uiContainer" class="top-bar">
+            <div class="logo">Mobile Mapper</div>
+            <div class="global-controls">
+                <button id="audioToggleBtn" class="mode-btn" title="Toggle Audio Input">🎤</button>
+                <button id="performanceBtn" class="mode-btn">Perform</button>
+                <button id="fullscreenBtn" class="mode-btn">⛶</button>
+                <button id="saveBtn" class="mode-btn">Save</button>
+                <button id="loadBtn" class="mode-btn">Load</button>
+            </div>
         </div>
-      </div>
+
+        <!-- Fine-tune vertex controls -->
+        <div id="vertexControls" class="vertex-controls hidden">
+            <div class="control-drag-handle"></div>
+            <div class="control-pad">
+                <div class="spacer"></div>
+                <button class="arrow-btn" data-dir="up">↑</button>
+                <div class="spacer"></div>
+                <button class="arrow-btn" data-dir="left">←</button>
+                <button class="arrow-btn" data-dir="down">↓</button>
+                <button class="arrow-btn" data-dir="right">→</button>
+            </div>
+            <div class="fine-tune-label">Fine Tune</div>
+        </div>
+
+        <!-- Modals -->
+        <div id="contentModal" class="modal hidden">
+            <div class="modal-content">
+                <h2>Select Content Type</h2>
+                <button class="content-type-btn" data-type="shader">Shader</button>
+                <button class="content-type-btn" data-type="video">Video</button>
+                <button class="close-modal">Cancel</button>
+            </div>
+        </div>
+
+        <div id="shaderModal" class="modal hidden">
+            <div class="modal-content">
+                <h2>Select Shader</h2>
+                <div id="shaderList" class="shader-list">
+                    <button class="shader-btn" data-shader="rainbow">Rainbow</button>
+                    <button class="shader-btn" data-shader="plasma">Plasma</button>
+                    <button class="shader-btn" data-shader="waves">Waves</button>
+                    <button class="shader-btn" data-shader="checkerboard">Checkerboard</button>
+                    <button class="shader-btn" data-shader="solid">Solid Color</button>
+                    <button class="shader-btn" data-shader="kaleidoscope">Kaleidoscope</button>
+                    <button class="shader-btn" data-shader="fractal">Fractal</button>
+                </div>
+                <button class="close-modal">Back</button>
+            </div>
+        </div>
+
+        <div id="videoModal" class="modal hidden">
+            <div class="modal-content">
+                <h2>Select Video</h2>
+                <input type="file" id="videoFileInput" accept="video/*" />
+                <div id="videoList" class="video-list"></div>
+                <button class="close-modal">Back</button>
+            </div>
+        </div>
+
+        <div id="welcomeModal" class="modal">
+            <div class="modal-content welcome-modal-content">
+                <h2>Mobile Mapper</h2>
+                <p class="welcome-subtitle">Projection Mapping Tool</p>
+                <div class="welcome-buttons">
+                    <button id="newProjectBtn" class="welcome-btn">New Project</button>
+                    <button id="loadProjectFileBtn" class="welcome-btn">Load File</button>
+                    <button id="continueProjectBtn" class="welcome-btn" disabled>Continue</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="performanceOverlay" class="hidden"></div>
+        <div id="statusMsg" class="status-msg hidden"></div>
     </div>
-
-    <div id="statusMsg" class="status-msg hidden">Status Message</div>
-
-    <!-- Scripts (Updated for Vite/TS) -->
-    <script type="module" src="src/app.ts"></script>
-  </body>
+    <script type="module" src="/src/app.ts"></script>
+</body>
 </html>

@@ -1,4 +1,12 @@
-// Shader definitions for projection mapping content
+export const VERTEX_SHADER = `
+    attribute vec2 a_position;
+    attribute vec2 a_texCoord;
+    varying vec2 v_texCoord;
+    void main() {
+        gl_Position = vec4(a_position, 0.0, 1.0);
+        v_texCoord = a_texCoord;
+    }
+`;
 
 const COMMON_UNIFORMS = `
     uniform float u_borderWidth;
@@ -27,46 +35,14 @@ const COMMON_UNIFORMS = `
     uniform float u_audioMidScale;
     uniform float u_audioHighScale;
     uniform float u_audioGain;
+    
+    // Masking
+    uniform int u_useMask;
+    uniform sampler2D u_maskTexture;
+    uniform vec2 u_resolution;
 `;
 
-// Helpers for main function logic (UV modification and Border Detection)
 const SHADER_HELPERS = `
-    vec2 getEffectUV(vec2 uv) {
-        // For "Outer Border" effect, we map the polygon texture 0-1 range
-        // to a sub-region inside the border.
-        // UVs: 0 -> border, 1 -> 1-border
-        if (u_enableBorder == 1) {
-            return (uv - u_borderWidth) / (1.0 - 2.0 * u_borderWidth);
-        }
-        return uv;
-    }
-
-    bool isBorder(vec2 uv) {
-        if (u_enableBorder == 1) {
-            return (uv.x < u_borderWidth || uv.x > 1.0 - u_borderWidth || uv.y < u_borderWidth || uv.y > 1.0 - u_borderWidth);
-        }
-        return false;
-    }
-
-    vec3 getBorderColor(float time) {
-        vec3 col = u_borderColor;
-        
-        // React to bass for border pulse if audio is active
-        // Apply per-shape scaling
-        float audioPulse = u_audioLow * u_audioBassScale * u_audioGain * 0.5;
-        
-        if (u_borderSpeed > 0.0) {
-            // Pulsing effect
-            float pulse = sin(time * u_borderSpeed) * 0.5 + 0.5;
-            col = mix(col * 0.5, col, pulse + audioPulse);
-        } else if (u_audioLevel > 0.01) {
-             col = mix(col, col * 1.5, audioPulse);
-        }
-        return col;
-    }
-`;
-
-const EFFECT_LOGIC = `
     vec3 rgb2hsv(vec3 c) {
         vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
         vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
@@ -82,62 +58,122 @@ const EFFECT_LOGIC = `
         vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
         return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
     }
-
-    vec3 applyColorAdjustments(vec3 color) {
-        vec3 finalColor = color;
-        
-        // Brightness - Audio Reactivity: Highs affect brightness
-        finalColor += u_brightness + (u_audioHigh * u_audioHighScale * u_audioGain * 0.2);
-        
-        // Contrast
-        finalColor = (finalColor - 0.5) * u_contrast + 0.5;
-        
-        // Saturation & Hue
-        vec3 hsv = rgb2hsv(finalColor);
-        hsv.y *= u_saturation;
-        hsv.x += u_hue;
-        finalColor = hsv2rgb(hsv);
-        
-        return finalColor;
+    
+    // Improved Border Detection using UV coordinates
+    bool isBorder(vec2 uv) {
+        if (u_enableBorder == 0) return false;
+        if (uv.x < u_borderWidth || uv.x > 1.0 - u_borderWidth ||
+            uv.y < u_borderWidth || uv.y > 1.0 - u_borderWidth) {
+            return true;
+        }
+        return false;
+    }
+    
+    vec3 getBorderColor(float time) {
+        float pulse = sin(time * u_borderSpeed) * 0.5 + 0.5; // 0 to 1
+        // Use audio for pulse if connected? Maybe later.
+        return u_borderColor * (0.5 + 0.5 * pulse);
     }
 
-    vec3 applyPattern(vec3 color, vec2 uv, float time) {
-        if (u_patternMode > 0) {
-            float pattern = 0.0;
-            vec2 puv = uv * u_patternScale;
+    vec4 applyMask(vec4 color, vec2 uv) {
+        if (u_useMask == 1) {
+            // Sample Mask Texture in Screen Space
+            vec2 screenUV = gl_FragCoord.xy / u_resolution;
+            float maskAlpha = texture2D(u_maskTexture, screenUV).a;
             
-            // Animate pattern
-            // Audio reactivity: Speed up pattern with volume
-            float t = time * u_patternSpeed + (u_audioLevel * u_audioGain * time * 2.0);
-
-            if (u_patternMode == 1) { // Scanlines
-                // Distort scanlines with mid frequencies
-                float distortion = sin(puv.x * 5.0 + t) * u_audioMid * u_audioMidScale * u_audioGain * 0.1;
-                pattern = sin((puv.y + distortion) * 3.14159 + t * 5.0) * 0.5 + 0.5;
-            } else if (u_patternMode == 2) { // Dots
-                vec2 g = fract(puv + vec2(t * 0.5, t * 0.5)) - 0.5;
-                // Pulse dots with low freq
-                float size = 0.25 + (u_audioLow * u_audioBassScale * u_audioGain * 0.1);
-                pattern = 1.0 - step(length(g), size);
-            } else if (u_patternMode == 3) { // Grid
-                vec2 g = abs(fract(puv + vec2(t * 0.2)) - 0.5);
-                float thickness = 0.45 - (u_audioHigh * u_audioHighScale * u_audioGain * 0.1);
-                pattern = step(max(g.x, g.y), thickness); 
-            }
+            // Logic: Mask Texture Alpha:
+            // 0.0 (Black/Hole) -> Occluded (Invisible)
+            // 1.0 (White/Ink) -> Visible
             
-            return mix(color, color * pattern, u_patternIntensity);
+            return vec4(color.rgb, color.a * maskAlpha);
         }
         return color;
     }
 `;
 
-export const SHADERS: {[key: string]: {name: string, fragment: string}} = {
+const EFFECT_LOGIC = `
+    vec2 getEffectUV(vec2 uv) {
+        // For patterns, we might want to distort UVs based on audio?
+        // For now, just return standard UV.
+        return uv;
+    }
+
+    vec3 applyPattern(vec3 color, vec2 uv, float time) {
+        if (u_patternMode == 0) return color;
+        
+        float pattern = 0.0;
+        float speed = u_patternSpeed * time;
+        
+        if (u_patternMode == 1) { // Scanlines
+            pattern = sin((uv.y * u_patternScale + speed) * 6.28) * 0.5 + 0.5;
+        } else if (u_patternMode == 2) { // Dots
+            vec2 st = fract(uv * u_patternScale) - 0.5;
+            if (length(st) < 0.3) pattern = 1.0;
+        } else if (u_patternMode == 3) { // Grid
+            vec2 st = fract(uv * u_patternScale);
+            if (st.x < 0.1 || st.y < 0.1) pattern = 1.0;
+        }
+        
+        // Apply Audio to pattern intensity?
+        float audioMod = u_audioLevel * u_audioGain; 
+        
+        return mix(color, vec3(pattern), u_patternIntensity + audioMod * 0.2);
+    }
+
+    vec3 applyColorAdjustments(vec3 color) {
+        // Brightness
+        vec3 c = color + u_brightness;
+        
+        // Contrast
+        c = (c - 0.5) * u_contrast + 0.5;
+        
+        // Saturation & Hue
+        vec3 hsv = rgb2hsv(c);
+        hsv.y *= u_saturation;
+        hsv.x += u_hue;
+        c = hsv2rgb(hsv);
+        
+        return c;
+    }
+`;
+
+export const VIDEO_FRAGMENT_TEMPLATE = `
+    precision mediump float;
+    uniform sampler2D u_texture;
+    uniform float u_time;
+    varying vec2 v_texCoord;
+    
+    ${COMMON_UNIFORMS}
+    ${SHADER_HELPERS}
+    ${EFFECT_LOGIC}
+
+    void main() {
+        vec2 uv = v_texCoord;
+        
+        if (isBorder(uv)) {
+            gl_FragColor = vec4(getBorderColor(u_time), 1.0);
+            return;
+        }
+
+        vec2 contentUV = getEffectUV(uv);
+        vec4 texColor = texture2D(u_texture, contentUV);
+        
+        vec3 color = applyPattern(texColor.rgb, contentUV, u_time);
+        color = applyColorAdjustments(color);
+        
+        // For drawings (which use this shader), texColor.a is important.
+        // For videos, it's usually 1.0.
+        vec4 finalColor = vec4(color, texColor.a);
+        gl_FragColor = applyMask(finalColor, uv);
+    }
+`;
+
+export const SHADERS: { [key: string]: { name: string; fragment: string } } = {
   rainbow: {
     name: "Rainbow",
     fragment: `
             precision mediump float;
             uniform float u_time;
-            uniform vec2 u_resolution;
             varying vec2 v_texCoord;
             
             ${COMMON_UNIFORMS}
@@ -169,17 +205,15 @@ export const SHADERS: {[key: string]: {name: string, fragment: string}} = {
                 color = applyPattern(color, contentUV, u_time);
                 color = applyColorAdjustments(color);
                 
-                gl_FragColor = vec4(color, 1.0);
+                gl_FragColor = applyMask(vec4(color, 1.0), uv);
             }
         `,
   },
-
   plasma: {
     name: "Plasma",
     fragment: `
             precision mediump float;
             uniform float u_time;
-            uniform vec2 u_resolution;
             varying vec2 v_texCoord;
 
             ${COMMON_UNIFORMS}
@@ -213,17 +247,15 @@ export const SHADERS: {[key: string]: {name: string, fragment: string}} = {
                 baseColor = applyPattern(baseColor, contentUV, u_time);
                 baseColor = applyColorAdjustments(baseColor);
                 
-                gl_FragColor = vec4(baseColor, 1.0);
+                gl_FragColor = applyMask(vec4(baseColor, 1.0), uv);
             }
         `,
   },
-
   waves: {
     name: "Waves",
     fragment: `
             precision mediump float;
             uniform float u_time;
-            uniform vec2 u_resolution;
             varying vec2 v_texCoord;
 
             ${COMMON_UNIFORMS}
@@ -239,28 +271,23 @@ export const SHADERS: {[key: string]: {name: string, fragment: string}} = {
                 }
 
                 vec2 contentUV = getEffectUV(uv);
-                
-                float wave = sin(contentUV.x * 10.0 + u_time * 2.0) * 0.5 + 0.5;
-                wave *= sin(contentUV.y * 10.0 + u_time * 2.0 + u_audioLow * u_audioBassScale * u_audioGain * 5.0) * 0.5 + 0.5;
+                vec2 p = contentUV * 6.0;
+                float i = p.y + u_time + cos(p.x + u_time) + sin(p.x + u_time) * (u_audioHigh * u_audioHighScale * u_audioGain);
+                float v = sin(i) * 0.5 + 0.5;
 
-                vec3 color1 = vec3(0.2, 0.5, 1.0);
-                vec3 color2 = vec3(1.0, 0.3, 0.7);
-                vec3 color = mix(color1, color2, wave);
-
+                vec3 color = vec3(0.0, v, v * 0.8);
                 color = applyPattern(color, contentUV, u_time);
                 color = applyColorAdjustments(color);
-
-                gl_FragColor = vec4(color, 1.0);
+                
+                gl_FragColor = applyMask(vec4(color, 1.0), uv);
             }
         `,
   },
-
   checkerboard: {
     name: "Checkerboard",
     fragment: `
             precision mediump float;
             uniform float u_time;
-            uniform vec2 u_resolution;
             varying vec2 v_texCoord;
 
             ${COMMON_UNIFORMS}
@@ -269,38 +296,30 @@ export const SHADERS: {[key: string]: {name: string, fragment: string}} = {
 
             void main() {
                 vec2 uv = v_texCoord;
-                
                 if (isBorder(uv)) {
                     gl_FragColor = vec4(getBorderColor(u_time), 1.0);
                     return;
                 }
 
                 vec2 contentUV = getEffectUV(uv);
-                vec2 puv = contentUV * 8.0;
+                float size = 10.0;
+                vec2 check = fract(contentUV * size + (u_audioLow * u_audioBassScale * 0.1));
                 
-                // Distort checkerboard with audio
-                puv.x += sin(puv.y * 0.5 + u_time) * u_audioLow * u_audioBassScale * u_audioGain;
+                float v = step(0.5, check.x) == step(0.5, check.y) ? 1.0 : 0.0;
+                vec3 color = vec3(v);
                 
-                float pattern = mod(floor(puv.x) + floor(puv.y), 2.0);
-
-                vec3 color1 = vec3(1.0, 1.0, 1.0);
-                vec3 color2 = vec3(0.0, 0.0, 0.0);
-                vec3 color = mix(color1, color2, pattern);
-
                 color = applyPattern(color, contentUV, u_time);
                 color = applyColorAdjustments(color);
-
-                gl_FragColor = vec4(color, 1.0);
+                
+                gl_FragColor = applyMask(vec4(color, 1.0), uv);
             }
         `,
   },
-
   solid: {
     name: "Solid Color",
     fragment: `
             precision mediump float;
             uniform float u_time;
-            uniform vec2 u_resolution;
             varying vec2 v_texCoord;
 
             ${COMMON_UNIFORMS}
@@ -309,32 +328,31 @@ export const SHADERS: {[key: string]: {name: string, fragment: string}} = {
 
             void main() {
                 vec2 uv = v_texCoord;
-                
                 if (isBorder(uv)) {
                     gl_FragColor = vec4(getBorderColor(u_time), 1.0);
                     return;
                 }
                 
                 vec2 contentUV = getEffectUV(uv);
-                vec3 color = vec3(1.0, 1.0, 1.0);
+                // Hue driven solid color
+                vec3 color = hsv2rgb(vec3(u_time * 0.1, 0.8, 1.0));
                 
-                // Pulse intensity with audio
-                color *= (0.8 + u_audioLevel * u_audioGain * 0.4);
-                
+                // Audio Mod to brightness
+                float audioBright = u_audioLevel * u_audioGain * 0.5;
+                color += audioBright;
+
                 color = applyPattern(color, contentUV, u_time);
                 color = applyColorAdjustments(color);
                 
-                gl_FragColor = vec4(color, 1.0);
+                gl_FragColor = applyMask(vec4(color, 1.0), uv);
             }
         `,
   },
-
-  grid: {
-    name: "Grid",
+  kaleidoscope: {
+    name: "Kaleidoscope",
     fragment: `
             precision mediump float;
             uniform float u_time;
-            uniform vec2 u_resolution;
             varying vec2 v_texCoord;
 
             ${COMMON_UNIFORMS}
@@ -343,89 +361,35 @@ export const SHADERS: {[key: string]: {name: string, fragment: string}} = {
 
             void main() {
                 vec2 uv = v_texCoord;
-                
-                if (isBorder(uv)) {
-                    gl_FragColor = vec4(getBorderColor(u_time), 1.0);
-                    return;
-                }
-
-                vec2 contentUV = getEffectUV(uv);
-                vec2 puv = contentUV * 10.0;
-                
-                // Grid lines
-                float thickness = 0.05 + u_audioHigh * u_audioHighScale * u_audioGain * 0.05;
-                float gx = step(1.0 - thickness, fract(puv.x));
-                float gy = step(1.0 - thickness, fract(puv.y));
-                float grid = max(gx, gy);
-                
-                vec3 color = vec3(grid);
-                
-                color = applyPattern(color, contentUV, u_time);
-                color = applyColorAdjustments(color);
-                
-                gl_FragColor = vec4(color, 1.0);
-            }
-        `,
-  },
-
-  kaleidoscope: {
-      name: "Kaleidoscope",
-      fragment: `
-            precision mediump float;
-            uniform float u_time;
-            uniform vec2 u_resolution;
-            varying vec2 v_texCoord;
-
-            ${COMMON_UNIFORMS}
-            ${SHADER_HELPERS}
-            ${EFFECT_LOGIC}
-
-            void main() {
-                vec2 uv = v_texCoord;
-                
                 if (isBorder(uv)) {
                     gl_FragColor = vec4(getBorderColor(u_time), 1.0);
                     return;
                 }
                 
-                vec2 contentUV = getEffectUV(uv);
-                
-                // Centered UV
-                vec2 p = contentUV - 0.5;
+                vec2 p = uv - 0.5;
                 float r = length(p);
                 float a = atan(p.y, p.x);
-                
-                // Audio reactivity
-                float sides = 6.0 + floor(u_audioMid * u_audioMidScale * u_audioGain * 10.0);
+                float sides = 6.0 + floor(u_audioMid * u_audioMidScale * 4.0);
                 float tau = 6.28318;
-                
                 a = mod(a, tau/sides);
                 a = abs(a - tau/sides/2.0);
+                p = r * vec2(cos(a), sin(a));
                 
-                vec2 newUV = r * vec2(cos(a), sin(a));
-                
-                // Color pattern
-                float c = cos(newUV.x * 20.0 + u_time) * sin(newUV.y * 20.0 + u_time);
-                vec3 color = vec3(
-                    c + u_audioLow * u_audioBassScale * u_audioGain, 
-                    c * 0.5 + u_audioMid * u_audioMidScale * u_audioGain, 
-                    c * 0.2 + u_audioHigh * u_audioHighScale * u_audioGain
-                );
-                
-                color = applyPattern(color, contentUV, u_time);
+                vec3 color = 0.5 + 0.5*cos(u_time + p.xyx + vec3(0,2,4));
+                color += u_audioHigh * 0.5;
+
+                color = applyPattern(color, uv, u_time);
                 color = applyColorAdjustments(color);
                 
-                gl_FragColor = vec4(color, 1.0);
+                gl_FragColor = applyMask(vec4(color, 1.0), uv);
             }
-      `
+      `,
   },
-
   fractal: {
-      name: "Fractal",
-      fragment: `
+    name: "Fractal",
+    fragment: `
             precision mediump float;
             uniform float u_time;
-            uniform vec2 u_resolution;
             varying vec2 v_texCoord;
 
             ${COMMON_UNIFORMS}
@@ -434,78 +398,32 @@ export const SHADERS: {[key: string]: {name: string, fragment: string}} = {
 
             void main() {
                 vec2 uv = v_texCoord;
-                
                 if (isBorder(uv)) {
                     gl_FragColor = vec4(getBorderColor(u_time), 1.0);
                     return;
                 }
                 
-                vec2 contentUV = getEffectUV(uv);
-                vec2 p = (contentUV - 0.5) * 2.0;
+                vec2 p = (uv - 0.5) * 2.0;
+                float zoom = 1.5 - (u_audioLow * u_audioBassScale * 0.2);
+                p /= zoom;
                 
-                // Mandelbrot-ish Iteration
-                vec2 c = vec2(sin(u_time * 0.2), cos(u_time * 0.3));
-                // Audio disturbs the constant
-                c += vec2(u_audioLow * u_audioBassScale * u_audioGain * 0.1, u_audioMid * u_audioMidScale * u_audioGain * 0.1);
-                
+                int i;
                 vec2 z = p;
-                float iter = 0.0;
+                float iters = 0.0;
                 for(int i=0; i<10; i++) {
-                    z = vec2(z.x*z.x - z.y*z.y, 2.0*z.x*z.y) + c;
-                    if(length(z) > 4.0) break;
-                    iter += 1.0;
+                    z = vec2(z.x*z.x - z.y*z.y, 2.0*z.x*z.y) + p;
+                    if(length(z) > 2.0) break;
+                    iters++;
                 }
                 
-                float val = iter / 10.0;
-                vec3 color = vec3(val, val * 0.5, 1.0 - val);
-                
-                color = applyPattern(color, contentUV, u_time);
+                float val = iters / 10.0;
+                vec3 color = hsv2rgb(vec3(val + u_time * 0.1, 0.8, 1.0));
+
+                color = applyPattern(color, uv, u_time);
                 color = applyColorAdjustments(color);
                 
-                gl_FragColor = vec4(color, 1.0);
+                gl_FragColor = applyMask(vec4(color, 1.0), uv);
             }
-      `
-  }
+      `,
+  },
 };
-
-// Vertex shader (same for all)
-export const VERTEX_SHADER = `
-    attribute vec2 a_position;
-    attribute vec2 a_texCoord;
-    varying vec2 v_texCoord;
-
-    void main() {
-        gl_Position = vec4(a_position, 0.0, 1.0);
-        v_texCoord = a_texCoord;
-    }
-`;
-
-// Video Fragment Shader Template
-export const VIDEO_FRAGMENT_TEMPLATE = `
-    precision mediump float;
-    uniform sampler2D u_texture;
-    uniform float u_time;
-    varying vec2 v_texCoord;
-    
-    ${COMMON_UNIFORMS}
-    ${SHADER_HELPERS}
-    
-    ${EFFECT_LOGIC}
-
-    void main() {
-        vec2 uv = v_texCoord;
-        
-        if (isBorder(uv)) {
-            gl_FragColor = vec4(getBorderColor(u_time), 1.0);
-            return;
-        }
-
-        vec2 contentUV = getEffectUV(uv);
-        vec4 texColor = texture2D(u_texture, contentUV);
-        
-        vec3 color = applyPattern(texColor.rgb, contentUV, u_time);
-        color = applyColorAdjustments(color);
-        
-        gl_FragColor = vec4(color, 1.0);
-    }
-`;

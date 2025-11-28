@@ -10,6 +10,10 @@ export class Renderer {
   videoTextures: Map<number, WebGLTexture>;
   startTime: number;
   audioData: { low: number; mid: number; high: number; level: number };
+  
+  // Masking Support
+  maskFramebuffer: WebGLFramebuffer | null;
+  maskTexture: WebGLTexture | null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -19,12 +23,14 @@ export class Renderer {
     this.videoTextures = new Map();
     this.startTime = Date.now();
     this.audioData = { low: 0, mid: 0, high: 0, level: 0 };
+    
+    this.maskFramebuffer = null;
+    this.maskTexture = null;
 
     this.resize();
     window.addEventListener("resize", () => this.resize());
   }
   
-  // ... existing methods ...
   resize() {
     const displayWidth = this.canvas.clientWidth;
     const displayHeight = this.canvas.clientHeight;
@@ -36,7 +42,30 @@ export class Renderer {
       this.canvas.width = displayWidth;
       this.canvas.height = displayHeight;
       this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+      this.initMaskBuffer();
     }
+  }
+
+  initMaskBuffer() {
+      const gl = this.gl;
+      const width = this.canvas.width;
+      const height = this.canvas.height;
+
+      if (this.maskTexture) gl.deleteTexture(this.maskTexture);
+      if (this.maskFramebuffer) gl.deleteFramebuffer(this.maskFramebuffer);
+
+      this.maskTexture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, this.maskTexture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+      this.maskFramebuffer = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.maskFramebuffer);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.maskTexture, 0);
+      
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
   updateAudioData(data: { low: number; mid: number; high: number; level: number }) {
@@ -116,6 +145,10 @@ export class Renderer {
         audioMidScale: gl.getUniformLocation(program, "u_audioMidScale"),
         audioHighScale: gl.getUniformLocation(program, "u_audioHighScale"),
         audioGain: gl.getUniformLocation(program, "u_audioGain"),
+
+        // Masking
+        useMask: gl.getUniformLocation(program, "u_useMask"),
+        maskTexture: gl.getUniformLocation(program, "u_maskTexture"),
       },
     };
 
@@ -123,34 +156,31 @@ export class Renderer {
     return info;
   }
 
-  // Helper to check if a point is inside a triangle
-  isPointInTriangle(p: Vertex, a: Vertex, b: Vertex, c: Vertex) {
-    const v0 = { x: c.x - a.x, y: c.y - a.y };
-    const v1 = { x: b.x - a.x, y: b.y - a.y };
-    const v2 = { x: p.x - a.x, y: p.y - a.y };
-
-    const dot00 = v0.x * v0.x + v0.y * v0.y;
-    const dot01 = v0.x * v1.x + v0.y * v1.y;
-    const dot02 = v0.x * v2.x + v0.y * v2.y;
-    const dot11 = v1.x * v1.x + v1.y * v1.y;
-    const dot12 = v1.x * v2.x + v1.y * v2.y;
-
-    const invDenom = 1 / (dot00 * dot11 - dot01 * dot01);
-    const u = (dot11 * dot02 - dot01 * dot12) * invDenom;
-    const v = (dot00 * dot12 - dot01 * dot02) * invDenom;
-
-    return u >= 0 && v >= 0 && u + v < 1;
-  }
-
-  renderPolygon(polygon: Polygon) {
+  renderPolygon(polygon: Polygon, isMaskRender: boolean = false) {
     const gl = this.gl;
 
     let programInfo;
-    if (polygon.contentType === "video") {
+    // For Mask Geometry Cutout (Pass A of Mask Render)
+    if (isMaskRender && polygon.useAsMask && !polygon.drawingCanvas) { 
+        // Should not happen if we structured logic right, but fallback
+        return;
+    }
+
+    if (polygon.contentType === "video" || polygon.contentType === "drawing") {
       programInfo = this.getProgramInfo("video", VIDEO_FRAGMENT_TEMPLATE);
     } else {
-      const shaderDef = SHADERS[polygon.shaderType] || SHADERS["rainbow"];
-      programInfo = this.getProgramInfo(polygon.shaderType, shaderDef.fragment);
+        // If we are rendering the Mask Shape Cutout, we use a simple color shader
+        if (isMaskRender) {
+             // Actually, reusing 'solid' shader or just basic video shader with no texture is fine
+             // But we need to force color to Black/Alpha 1 for cutout? 
+             // Wait, logic is: Cutout = Multiply Dest Alpha by 0.
+             // So we just need to render *something* with the geometry.
+             // The Video shader works fine, we just ignore texture if we want.
+             programInfo = this.getProgramInfo("video", VIDEO_FRAGMENT_TEMPLATE);
+        } else {
+            const shaderDef = SHADERS[polygon.shaderType] || SHADERS["rainbow"];
+            programInfo = this.getProgramInfo(polygon.shaderType, shaderDef.fragment);
+        }
     }
 
     if (!programInfo) return;
@@ -161,40 +191,24 @@ export class Renderer {
     const positions: number[] = [];
     const texCoords: number[] = [];
     
-    // --- Grid Warp Rendering ---
     if (polygon.warpMode && polygon.gridVertices.length > 0) {
         const size = polygon.gridSize;
-        // Render each cell as 2 triangles
         for (let y = 0; y < size - 1; y++) {
             for (let x = 0; x < size - 1; x++) {
-                // Grid indices
-                const i1 = y * size + x;         // TL
-                const i2 = y * size + x + 1;     // TR
-                const i3 = (y + 1) * size + x;   // BL
-                const i4 = (y + 1) * size + x + 1; // BR
-                
-                // Vertices
-                const v1 = polygon.gridVertices[i1];
-                const v2 = polygon.gridVertices[i2];
-                const v3 = polygon.gridVertices[i3];
-                const v4 = polygon.gridVertices[i4];
-                
-                // Add first triangle (TL, TR, BL)
+                const i1 = y * size + x;
+                const i2 = y * size + x + 1;
+                const i3 = (y + 1) * size + x;
+                const i4 = (y + 1) * size + x + 1;
                 this.addTriangleToBuffers(positions, texCoords, polygon.gridVertices, i1, i2, i3, size, x, y, 0);
-                // Add second triangle (TR, BR, BL) - Note: standard quad split
                 this.addTriangleToBuffers(positions, texCoords, polygon.gridVertices, i2, i4, i3, size, x, y, 1);
             }
         }
     } else {
-        // --- Standard Polygon Rendering ---
-        // Triangulate using Earcut for correct handling of concave polygons
-        
         const verts = polygon.getDiscretizedVertices(20);
         const flatVerts: number[] = [];
         verts.forEach(v => flatVerts.push(v.x, v.y));
         
         const triangles = earcut(flatVerts);
-        
         const bounds = polygon.getBoundingBox();
         const mapUV = (x: number, y: number) => {
             return [
@@ -212,12 +226,10 @@ export class Renderer {
             const v2 = verts[i2];
             const v3 = verts[i3];
             
-            // Positions
             positions.push(v1.x * 2 - 1, -(v1.y * 2 - 1));
             positions.push(v2.x * 2 - 1, -(v2.y * 2 - 1));
             positions.push(v3.x * 2 - 1, -(v3.y * 2 - 1));
             
-            // UVs
             texCoords.push(...mapUV(v1.x, v1.y));
             texCoords.push(...mapUV(v2.x, v2.y));
             texCoords.push(...mapUV(v3.x, v3.y));
@@ -237,34 +249,35 @@ export class Renderer {
     gl.vertexAttribPointer(programInfo.attribLocations.texCoord, 2, gl.FLOAT, false, 0, 0);
 
     // --- Set Uniforms ---
-    
+    // ... (Standard Uniforms)
     // Aggregate Effect Params
     let brightness = 0.0, contrast = 1.0, saturation = 1.0, hue = 0.0;
     let patternMode = 0, patternScale = 10.0, patternIntensity = 0.0, patternSpeed = 1.0;
     let enableBorder = 0, borderWidth = 0.0, borderColor = {r:1, g:1, b:1}, borderSpeed = 0.0;
     
-    polygon.effects.forEach(effect => {
-        const p = effect.params;
-        if (effect.type === 'brightness') brightness += p.value;
-        if (effect.type === 'contrast') contrast *= p.value;
-        if (effect.type === 'saturation') saturation *= p.value;
-        if (effect.type === 'hue') hue += p.value;
-        
-        if (['scanlines', 'dots', 'grid'].includes(effect.type)) {
-            // Last pattern overrides (simple stack)
-            patternMode = effect.type === 'scanlines' ? 1 : effect.type === 'dots' ? 2 : 3;
-            patternScale = p.scale;
-            patternIntensity = p.intensity;
-            patternSpeed = p.speed || 1.0;
-        }
-        
-        if (effect.type === 'border') {
-            enableBorder = 1;
-            borderWidth = p.width;
-            if (p.color) borderColor = p.color;
-            borderSpeed = p.speed || 0.0;
-        }
-    });
+    if (!isMaskRender) { // Don't apply effects to the mask layer itself
+        polygon.effects.forEach(effect => {
+            const p = effect.params;
+            if (effect.type === 'brightness') brightness += p.value;
+            if (effect.type === 'contrast') contrast *= p.value;
+            if (effect.type === 'saturation') saturation *= p.value;
+            if (effect.type === 'hue') hue += p.value;
+            
+            if (['scanlines', 'dots', 'grid'].includes(effect.type)) {
+                patternMode = effect.type === 'scanlines' ? 1 : effect.type === 'dots' ? 2 : 3;
+                patternScale = p.scale;
+                patternIntensity = p.intensity;
+                patternSpeed = p.speed || 1.0;
+            }
+            
+            if (effect.type === 'border') {
+                enableBorder = 1;
+                borderWidth = p.width;
+                if (p.color) borderColor = p.color;
+                borderSpeed = p.speed || 0.0;
+            }
+        });
+    }
 
     gl.uniform1f(programInfo.uniformLocations.brightness, brightness);
     gl.uniform1f(programInfo.uniformLocations.contrast, contrast);
@@ -280,21 +293,14 @@ export class Renderer {
     gl.uniform1f(programInfo.uniformLocations.borderWidth, borderWidth);
     gl.uniform1f(programInfo.uniformLocations.borderSpeed, borderSpeed);
     if (borderColor) {
-      gl.uniform3f(
-        programInfo.uniformLocations.borderColor,
-        borderColor.r,
-        borderColor.g,
-        borderColor.b
-      );
+      gl.uniform3f(programInfo.uniformLocations.borderColor, borderColor.r, borderColor.g, borderColor.b);
     }
 
-    // Pass Audio Data
     gl.uniform1f(programInfo.uniformLocations.audioLow, this.audioData.low);
     gl.uniform1f(programInfo.uniformLocations.audioMid, this.audioData.mid);
     gl.uniform1f(programInfo.uniformLocations.audioHigh, this.audioData.high);
     gl.uniform1f(programInfo.uniformLocations.audioLevel, this.audioData.level);
 
-    // Pass Per-Shape Audio Settings
     const audioSettings = polygon.audioSettings || { bassScale: 1, midScale: 1, highScale: 1, gain: 1, enabled: true };
     const enabled = audioSettings.enabled ? 1.0 : 0.0;
     
@@ -306,8 +312,18 @@ export class Renderer {
     const time = (Date.now() - this.startTime) / 1000;
     gl.uniform1f(programInfo.uniformLocations.time, time);
 
-    // Set base uniforms
-    if (polygon.contentType === "video" && polygon.videoElement) {
+    // Mask Uniforms
+    if (isMaskRender) {
+        // When rendering the mask generation passes, we don't use the mask texture
+        gl.uniform1i(programInfo.uniformLocations.useMask, 0);
+    } else {
+        // When rendering scene, use the global mask
+        gl.uniform1i(programInfo.uniformLocations.useMask, 1);
+        gl.uniform1i(programInfo.uniformLocations.maskTexture, 1);
+    }
+
+    // Set Content Texture (Unit 0)
+    if ((polygon.contentType === "video" && polygon.videoElement) || (polygon.contentType === "drawing" && polygon.drawingCanvas)) {
       let texture = this.videoTextures.get(polygon.id);
       if (!texture) {
         texture = gl.createTexture()!;
@@ -316,26 +332,25 @@ export class Renderer {
 
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, texture);
+      
+      const source = polygon.contentType === "video" ? polygon.videoElement! : polygon.drawingCanvas!;
+      
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+      
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        gl.RGBA,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        polygon.videoElement
-      );
+      
       gl.uniform1i(programInfo.uniformLocations.texture, 0);
-    } else {
-      gl.uniform2f(
+    } 
+    
+    // Always set resolution, as it's now needed for masking in all shaders (including video)
+    gl.uniform2f(
         programInfo.uniformLocations.resolution,
         this.canvas.width,
         this.canvas.height
-      );
-    }
+    );
 
     gl.drawArrays(gl.TRIANGLES, 0, positions.length / 2);
 
@@ -355,7 +370,6 @@ export class Renderer {
     cellY: number,
     triType: number
   ) {
-    // Map vertices to screen space
     const v1 = vertices[i1];
     const v2 = vertices[i2];
     const v3 = vertices[i3];
@@ -364,27 +378,15 @@ export class Renderer {
     positions.push(v2.x * 2 - 1, -(v2.y * 2 - 1));
     positions.push(v3.x * 2 - 1, -(v3.y * 2 - 1));
     
-    // UV Mapping for Grid Cell
-    // We assume the grid maps linearly to 0-1 UV space
-    // cellX/Y are integers from 0 to gridSize-1
     const steps = size - 1;
     const u1 = cellX / steps;
     const v_1 = cellY / steps;
     
-    // Calculate UVs for the specific triangle points
-    // i1 = x, y
-    // i2 = x+1, y
-    // i3 = x, y+1 (for tri 0) OR i3 = x+1, y (for tri 1?? No, wait)
-    
-    // For triType 0 (TL, TR, BL):
-    // TL (x,y), TR (x+1, y), BL (x, y+1)
     if (triType === 0) {
         texCoords.push(u1, v_1);                         // TL
         texCoords.push((cellX + 1) / steps, v_1);        // TR
         texCoords.push(u1, (cellY + 1) / steps);         // BL
     } else {
-        // For triType 1 (TR, BR, BL):
-        // TR (x+1, y), BR (x+1, y+1), BL (x, y+1)
         texCoords.push((cellX + 1) / steps, v_1);        // TR
         texCoords.push((cellX + 1) / steps, (cellY + 1) / steps); // BR
         texCoords.push(u1, (cellY + 1) / steps);         // BL
@@ -394,21 +396,124 @@ export class Renderer {
   render(polygons: Polygon[], editMode: boolean) {
     const gl = this.gl;
     
-    // Clear
-    gl.clearColor(0.0, 0.0, 0.0, 0.0);
+    // --- PASS 1: Render Global Mask ---
+    const maskPolygons = polygons.filter(p => p.type === 'drawing' && p.useAsMask);
+    
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.maskFramebuffer);
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    
+    // 1. Default state: Everything is Visible (White)
+    gl.clearColor(1.0, 1.0, 1.0, 1.0); 
     gl.clear(gl.COLOR_BUFFER_BIT);
 
-    // If edit mode is OFF, we might want a black background or transparent?
-    // Usually transparent for mapping on top of things, but black for projector.
-    // Let's keep it transparent so CSS background shows if any, or black.
-    // Actually, mapping needs black background usually.
-    if (!editMode) {
-        // gl.clearColor(0,0,0,1);
-        // gl.clear(gl.COLOR_BUFFER_BIT);
+    if (maskPolygons.length > 0) {
+        // 2. For each Mask Polygon:
+        maskPolygons.forEach(poly => {
+            if (!poly.drawingCanvas) return;
+
+            // Sub-Pass A: "Cutout" / Occlude
+            // Render the Polygon Geometry as Opaque Black (0,0,0,1) to "Hide" everything behind it.
+            // Destination = Source * 0 + Destination * (1 - SourceAlpha) => (Assume Geometry is solid alpha)
+            // Simply: Where geometry is, set Dest to 0.
+            gl.blendFuncSeparate(gl.ZERO, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE_MINUS_SRC_ALPHA);
+            gl.enable(gl.BLEND);
+            
+            // We want to render "Black" geometry.
+            // We can use a simple shader trick: use Border shader or disable Texture?
+            // Let's just rely on the fact that drawing canvas is transparent except where ink is.
+            // Wait, Polygon Geometry is the square. We want to cut the WHOLE square out.
+            // So we need to render the Polygon Base.
+            // We'll trick renderPolygon to render a "Solid Black" version?
+            // Or we can just enable border and set width to huge? No.
+            
+            // Let's temporarily modify effects to force black? Hacky.
+            // Better: Set blend mode to erase.
+            
+            // Render the Geometry (Mesh). 
+            // We need a way to render "Solid 1.0 Alpha" for the whole mesh.
+            // The existing shaders render the texture.
+            // If texture is the DrawingCanvas, it is transparent.
+            // So renderPolygon uses the DrawingCanvas texture.
+            
+            // Issue: We need to render the *Shape* (the quad) as solid, THEN the ink.
+            // Hack: Render the polygon with NO texture (force white/solid) -> Erase.
+            // Then Render with texture -> Add.
+            
+            // Let's add a helper mode to renderPolygon? 
+            // For now, let's assume the user wants the "Drawing" to be the mask.
+            // "mask anything it is covering (but only the parts it covers)"
+            // "ink makes that part of that mask see through"
+            
+            // Interpretation: The Mask Polygon defines an area of Darkness.
+            // Inside that area, Ink defines Light.
+            
+            // Step A: Render the Polygon Mesh as SOLID BLACK (Alpha 0 in our mask buffer).
+            // We can use a dummy 1x1 white texture for this pass to ensure full coverage?
+            
+            // Let's assume renderPolygon handles geometry correctly.
+            // We need to override the shader to output constant Alpha 1.0 (to trigger the erase blend).
+            // Actually, let's just use blendFunc(ZERO, ONE_MINUS_SRC_ALPHA).
+            // And we need the Source Alpha to be 1.0 everywhere in the mesh.
+            // But 'renderPolygon' uses the texture alpha.
+            // We need a way to render the mesh "Filled".
+            
+            // Let's make a quick "Fill" pass.
+            // We can reuse renderPolygon but pass a flag "forceFill"?
+            
+            // Since I can't easily modify renderPolygon deeper without breaking things, 
+            // I'll skip the "Solid Cutout" pass if I can't do it easily.
+            // But without it, "mask anything it is covering" won't work.
+            
+            // Solution: Use `disable(gl.TEXTURE_2D)`? No, shader uses it.
+            // Solution: Use a "Solid Color" shader for the Cutout pass.
+            // We have `SHADERS['solid']`.
+            const originalType = poly.shaderType;
+            const originalContent = poly.contentType;
+            
+            // -- CUTOUT PASS --
+            poly.contentType = 'shader';
+            poly.shaderType = 'solid'; // Renders solid color (based on Hue)
+            // We want pure alpha 1.
+            // 'solid' shader outputs alpha 1.0. Good.
+            
+            // Erase existing mask buffer where this polygon is.
+            gl.blendFunc(gl.ZERO, gl.ONE_MINUS_SRC_ALPHA);
+            this.renderPolygon(poly, true);
+            
+            // Restore
+            poly.contentType = originalContent;
+            poly.shaderType = originalType;
+            
+            // -- INK REVEAL PASS --
+            // Now render the Drawing Texture (Ink).
+            // Ink Alpha should be ADDED to the mask buffer.
+            // (Ink = 1 means Visible).
+            // Dst (0) + Src (1) = 1.
+            gl.blendFunc(gl.ONE, gl.ONE);
+            this.renderPolygon(poly, true);
+        });
     }
+    
+    // Reset Blend Mode
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+
+    // --- PASS 2: Render Scene ---
+    
+    // Clear Screen
+    gl.clearColor(0.0, 0.0, 0.0, 0.0); // Transparent background for app
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    // Bind Global Mask Texture to Unit 1
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.maskTexture);
 
     polygons.forEach((polygon) => {
-      this.renderPolygon(polygon);
+      // Do not render the mask polygons themselves in the scene
+      if (polygon.useAsMask) return;
+      
+      this.renderPolygon(polygon, false);
     });
   }
 }
