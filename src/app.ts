@@ -24,6 +24,10 @@ class MobileMapperApp {
   uiVisible: boolean;
   userHasToggledMode: boolean;
   lastBrushPos: { x: number; y: number } | null = null;
+  
+  // Dual Screen Support
+  broadcastChannel: BroadcastChannel;
+  isProjectorMode: boolean;
 
   constructor() {
     this.canvas = document.getElementById("mainCanvas") as HTMLCanvasElement;
@@ -46,15 +50,26 @@ class MobileMapperApp {
     this.controlsPosition = { x: null, y: null };
     this.uiVisible = true;
     this.userHasToggledMode = false;
-
+    
+    // Initialize Dual Screen / Projector Mode
+    this.isProjectorMode = new URLSearchParams(window.location.search).has("projector");
+    this.broadcastChannel = new BroadcastChannel("mobile_mapper_sync");
+    
+    this.setupBroadcastListener();
     this.setupEventListeners();
     this.resizeOverlay();
+    
     window.addEventListener("resize", () => {
       this.resizeOverlay();
     });
+    
+    if (this.isProjectorMode) {
+        this.enableProjectorMode();
+    } else {
+        this.showWelcomeModal();
+    }
+    
     this.animate();
-
-    this.showWelcomeModal();
   }
 
   resizeOverlay() {
@@ -68,6 +83,53 @@ class MobileMapperApp {
       this.overlayCanvas.width = displayWidth;
       this.overlayCanvas.height = displayHeight;
     }
+  }
+  
+  enableProjectorMode() {
+      console.log("Starting in Projector Mode");
+      // 1. Hide UI
+      document.querySelector('.top-bar')?.classList.add('hidden');
+      document.querySelector('#toggleSidebarBtn')?.classList.add('hidden');
+      document.querySelector('#leftSidebar')?.classList.add('hidden');
+      document.querySelector('#rightSidebar')?.classList.add('hidden');
+      document.querySelector('#vertexControls')?.classList.add('hidden');
+      document.querySelector('#welcomeModal')?.classList.add('hidden');
+      
+      // 2. Set Performance/Edit Mode
+      this.editMode = false; // Performance mode
+      this.togglePerformanceMode(); // Apply UI changes if any
+      
+      // 3. Lock Interactions (optional, just overlay hidden canvas)
+      this.overlayCanvas.style.pointerEvents = 'none';
+      
+      this.showStatus("Projector Mode Active");
+  }
+  
+  setupBroadcastListener() {
+      this.broadcastChannel.onmessage = (event) => {
+          if (this.isProjectorMode) {
+              const msg = event.data;
+              if (msg.type === 'SYNC_STATE') {
+                  this.loadProjectData(msg.payload, true); // true = isSync
+              }
+          }
+      };
+  }
+  
+  syncState() {
+      if (this.isProjectorMode) return;
+      
+      const data = {
+          polygons: this.polygons.map((p) => p.toJSON()),
+          videos: Array.from(this.loadedVideos.entries()),
+          version: "1.0",
+          name: "sync"
+      };
+      
+      this.broadcastChannel.postMessage({
+          type: 'SYNC_STATE',
+          payload: data
+      });
   }
 
   setupEventListeners() {
@@ -94,13 +156,13 @@ class MobileMapperApp {
 
     document
       .getElementById("addTriangleBtn")!
-      .addEventListener("click", () => this.setTool("triangle"));
+      .addEventListener("click", () => { this.setTool("triangle"); this.syncState(); });
     document
       .getElementById("addSquareBtn")!
-      .addEventListener("click", () => this.setTool("square"));
+      .addEventListener("click", () => { this.setTool("square"); this.syncState(); });
     document
       .getElementById("addCircleBtn")!
-      .addEventListener("click", () => this.setTool("circle"));
+      .addEventListener("click", () => { this.setTool("circle"); this.syncState(); });
     document
       .getElementById("drawPolygonBtn")!
       .addEventListener("click", () => this.setTool("draw"));
@@ -109,6 +171,7 @@ class MobileMapperApp {
       this.polygons.push(poly);
       this.selectPolygon(poly);
       this.setTool("brush"); // Auto-switch to brush
+      this.syncState();
     });
 
     document
@@ -119,7 +182,7 @@ class MobileMapperApp {
       .addEventListener("click", () => this.setTool("brush"));
     document
       .getElementById("deleteBtn")!
-      .addEventListener("click", () => this.deleteSelected());
+      .addEventListener("click", () => { this.deleteSelected(); this.syncState(); });
 
     // Brush Controls
     const updateBrushSettings = () => {
@@ -164,6 +227,7 @@ class MobileMapperApp {
         const ctx = this.selectedPolygon.drawingCtx;
         ctx.clearRect(0, 0, 1024, 1024);
         this.selectedPolygon.isDirty = true;
+        this.syncState();
       }
     });
 
@@ -174,6 +238,7 @@ class MobileMapperApp {
           this.selectedPolygon.useAsMask = (
             e.target as HTMLInputElement
           ).checked;
+          this.syncState();
         }
       });
 
@@ -182,9 +247,10 @@ class MobileMapperApp {
       .addEventListener("click", () => this.showContentModal());
     document
       .getElementById("warpToggle")!
-      .addEventListener("change", (e) =>
-        this.toggleWarpMode((e.target as HTMLInputElement).checked)
-      );
+      .addEventListener("change", (e) => {
+        this.toggleWarpMode((e.target as HTMLInputElement).checked);
+        this.syncState();
+      });
 
     // Audio Settings Controls
     document
@@ -194,6 +260,7 @@ class MobileMapperApp {
           this.selectedPolygon.audioSettings.enabled = (
             e.target as HTMLInputElement
           ).checked;
+          this.syncState();
         }
       });
 
@@ -204,6 +271,8 @@ class MobileMapperApp {
           (this.selectedPolygon.audioSettings as any)[param] = parseFloat(
             (e.target as HTMLInputElement).value
           );
+          // Debounce sync?
+          this.syncState(); 
         }
       });
     };
@@ -218,6 +287,7 @@ class MobileMapperApp {
         document.getElementById("effectTypeSelect") as HTMLSelectElement
       ).value;
       this.addEffect(type);
+      this.syncState();
     });
 
     document
@@ -235,6 +305,19 @@ class MobileMapperApp {
     document
       .getElementById("audioToggleBtn")!
       .addEventListener("click", () => this.toggleAudio());
+      
+    // Add "Open Projector Window" Button logic dynamically or add to HTML
+    const topControls = document.querySelector('.global-controls');
+    if (topControls) {
+        const projBtn = document.createElement('button');
+        projBtn.className = 'mode-btn';
+        projBtn.textContent = 'Dual Screen';
+        projBtn.title = 'Open separate window for projection';
+        projBtn.onclick = () => {
+            window.open(window.location.href + '?projector=1', 'MobileMapperProjector', 'width=800,height=600');
+        };
+        topControls.insertBefore(projBtn, topControls.firstChild);
+    }
 
     this.canvas.addEventListener(
       "touchstart",
@@ -252,14 +335,18 @@ class MobileMapperApp {
     this.canvas.addEventListener("mouseup", (e) => this.handleMouseUp(e));
 
     document.querySelectorAll(".arrow-btn").forEach((btn) => {
-      btn.addEventListener("click", () =>
-        this.finetuneVertex((btn as HTMLElement).dataset.dir!)
-      );
+      btn.addEventListener("click", () => {
+        this.finetuneVertex((btn as HTMLElement).dataset.dir!);
+        this.syncState();
+      });
     });
 
     document
       .getElementById("toggleCurveBtn")
-      ?.addEventListener("click", () => this.toggleVertexCurve());
+      ?.addEventListener("click", () => {
+          this.toggleVertexCurve();
+          this.syncState();
+      });
 
     document.querySelectorAll(".close-modal").forEach((btn) => {
       btn.addEventListener("click", () => this.hideAllModals());
@@ -276,6 +363,7 @@ class MobileMapperApp {
     document.querySelectorAll(".shader-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
         this.setPolygonContent("shader", (btn as HTMLElement).dataset.shader!);
+        this.syncState();
       });
     });
 
@@ -283,16 +371,20 @@ class MobileMapperApp {
       .getElementById("videoFileInput")!
       .addEventListener("change", (e) => {
         this.handleVideoUpload(e as any);
+        // Video upload sync is tricky with Blobs.
+        // Ideally we sync the blob URL but it must be valid in other window.
+        // Usually window.open shares the session/blob store.
+        this.syncState();
       });
 
     const performanceOverlay = document.getElementById("performanceOverlay")!;
     performanceOverlay.addEventListener("click", () => {
-      if (!this.editMode) this.togglePerformanceMode();
+      if (!this.editMode && !this.isProjectorMode) this.togglePerformanceMode();
     });
     performanceOverlay.addEventListener(
       "touchstart",
       (e) => {
-        if (!this.editMode) {
+        if (!this.editMode && !this.isProjectorMode) {
           e.preventDefault();
           this.togglePerformanceMode();
         }
@@ -322,13 +414,13 @@ class MobileMapperApp {
 
     document
       .getElementById("newProjectBtn")!
-      .addEventListener("click", () => this.startNewProject());
+      .addEventListener("click", () => { this.startNewProject(); this.syncState(); });
     document
       .getElementById("loadProjectFileBtn")!
-      .addEventListener("click", () => this.loadProjectFromFile());
+      .addEventListener("click", () => this.loadProjectFromFile()); // Load triggers sync inside loadProjectData
     document
       .getElementById("continueProjectBtn")!
-      .addEventListener("click", () => this.continueLastProject());
+      .addEventListener("click", () => { this.continueLastProject(); });
   }
 
   handleBrushStroke(clientX: number, clientY: number, isStart: boolean) {
@@ -380,6 +472,7 @@ class MobileMapperApp {
       ctx.globalCompositeOperation = "source-over";
       ctx.strokeStyle = settings.color;
       ctx.globalAlpha = settings.opacity;
+      ctx.lineWidth = settings.size; // Corrected logic
     }
 
     if (isStart || !this.lastBrushPos) {
@@ -399,6 +492,9 @@ class MobileMapperApp {
 
     this.lastBrushPos = { x, y };
     poly.isDirty = true;
+    
+    // Throttle sync for brush?
+    // For now, sync on MouseUp to avoid lag
   }
 
   handlePointerDown(clientX: number, clientY: number) {
@@ -420,16 +516,19 @@ class MobileMapperApp {
       this.polygons.push(poly);
       this.selectPolygon(poly);
       this.setTool("select");
+      this.syncState();
     } else if (this.currentTool === "square") {
       const poly = ShapeFactory.createSquare(coords.x, coords.y);
       this.polygons.push(poly);
       this.selectPolygon(poly);
       this.setTool("select");
+      this.syncState();
     } else if (this.currentTool === "circle") {
       const poly = ShapeFactory.createCircle(coords.x, coords.y);
       this.polygons.push(poly);
       this.selectPolygon(poly);
       this.setTool("select");
+      this.syncState();
     } else if (this.currentTool === "draw") {
       if (this.drawingVertices.length >= 3) {
         const first = this.drawingVertices[0];
@@ -438,6 +537,7 @@ class MobileMapperApp {
         );
         if (dist < 0.05) {
           this.finishDrawing();
+          this.syncState();
           return;
         }
       }
@@ -491,11 +591,13 @@ class MobileMapperApp {
 
     if (this.selectedPolygon && this.selectedVertex) {
       this.selectedPolygon.moveVertex(this.selectedVertex, coords.x, coords.y);
+      this.syncState(); // Sync geometry changes
     } else if (this.selectedPolygon && this.dragStart) {
       const dx = coords.x - this.dragStart.x;
       const dy = coords.y - this.dragStart.y;
       this.selectedPolygon.translate(dx, dy);
       this.dragStart = coords;
+      this.syncState(); // Sync translation
     }
   }
 
@@ -503,6 +605,7 @@ class MobileMapperApp {
     if (this.currentTool === "brush") {
       this.isDrawing = false;
       this.lastBrushPos = null;
+      this.syncState(); // Sync drawing after stroke
     }
 
     if (this.dragStart) {
@@ -753,12 +856,40 @@ class MobileMapperApp {
   }
 
   toggleFullscreen() {
-    if (!document.fullscreenElement) {
-      document.documentElement
-        .requestFullscreen()
-        .catch(() => this.showStatus("Fullscreen not available"));
+    const doc = document as any;
+    const docEl = document.documentElement as any;
+
+    const requestFullScreen =
+      docEl.requestFullscreen ||
+      docEl.webkitRequestFullscreen ||
+      docEl.mozRequestFullScreen ||
+      docEl.msRequestFullscreen;
+
+    const exitFullScreen =
+      doc.exitFullscreen ||
+      doc.webkitExitFullscreen ||
+      doc.mozCancelFullScreen ||
+      doc.msExitFullscreen;
+
+    if (
+      !doc.fullscreenElement &&
+      !doc.webkitFullscreenElement &&
+      !doc.mozFullScreenElement &&
+      !doc.msFullscreenElement
+    ) {
+      if (requestFullScreen) {
+        requestFullScreen.call(docEl).catch((err: any) => {
+          console.error("Fullscreen error:", err);
+          this.showStatus("Fullscreen blocked or not supported");
+        });
+      } else {
+        // Fallback for iOS Safari which often doesn't support the API on elements
+        this.showStatus("Tap Share (box+arrow) > 'Add to Home Screen' for App Mode");
+      }
     } else {
-      document.exitFullscreen();
+      if (exitFullScreen) {
+        exitFullScreen.call(doc);
+      }
     }
   }
 
@@ -788,6 +919,8 @@ class MobileMapperApp {
     this.loadProjectFromLocalStorage();
     document.getElementById("welcomeModal")!.classList.add("hidden");
     this.showStatus("Project loaded from last session");
+    // Trigger sync
+    this.syncState();
   }
 
   loadProjectFromFile() {
@@ -804,6 +937,7 @@ class MobileMapperApp {
           this.loadProjectData(data);
           document.getElementById("welcomeModal")!.classList.add("hidden");
           this.showStatus("Project loaded from file!");
+          this.syncState();
         } catch (e) {
           this.showStatus("Failed to load project file");
           console.error(e);
@@ -854,25 +988,38 @@ class MobileMapperApp {
     }
   }
 
-  loadProjectData(data: any) {
+  loadProjectData(data: any, isSync: boolean = false) {
     this.polygons = data.polygons.map((p: any) => Polygon.fromJSON(p));
+    
     if (data.videos) {
+      // If we are syncing, we might need to reuse Blob URLs if they are valid across windows
+      // Or just hope the user has loaded them in the projector window too?
+      // For now, just copy the map.
+      // In a real scenario, we'd need to transfer the Blob itself or use a SharedWorker.
       this.loadedVideos = new Map(data.videos);
+      
       this.polygons.forEach((poly) => {
         if (poly.contentType === "video") {
           if (poly.videoSrc && this.loadedVideos.has(poly.videoSrc))
             poly.loadVideo();
           else {
-            poly.contentType = "shader";
-            poly.shaderType = "rainbow";
+            // If video URL invalid in this window context (common with blob:), fallback
+            // But if window.open was used, blob: URLs *might* work.
+            poly.loadVideo(); // Try anyway
           }
         }
       });
     }
-    this.renderLayersList();
+    if (!isSync) {
+        this.renderLayersList();
+        this.syncState(); // Sync after load
+    }
   }
 
   animate() {
+    // Check for resize every frame
+    this.resizeOverlay();
+
     if (this.audioManager.isActive) {
       this.renderer.updateAudioData(this.audioManager.getAudioData());
     } else {
@@ -1222,6 +1369,7 @@ class MobileMapperApp {
         removeBtn.addEventListener("click", (e) => {
           const target = e.target as HTMLElement;
           this.removeEffect(target.dataset.effectId!);
+          this.syncState();
         });
       }
 
@@ -1236,6 +1384,7 @@ class MobileMapperApp {
           const update: any = {};
           update[param] = val;
           this.updateEffectParam(effectId, update);
+          this.syncState();
         });
       });
 

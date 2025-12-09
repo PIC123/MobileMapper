@@ -159,6 +159,8 @@ export class Polygon {
     this.videoElement.src = this.videoSrc;
     this.videoElement.loop = true;
     this.videoElement.muted = true;
+    this.videoElement.setAttribute("playsinline", "");
+    this.videoElement.setAttribute("webkit-playsinline", "");
     this.videoElement.play().catch((e) => console.warn("Video play failed", e));
   }
 

@@ -394,6 +394,9 @@ export class Renderer {
   }
 
   render(polygons: Polygon[], editMode: boolean) {
+    // Check for resize every frame to handle fullscreen transitions robustly
+    this.resize();
+
     const gl = this.gl;
     
     // --- PASS 1: Render Global Mask ---
