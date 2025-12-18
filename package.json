@@ -4,6 +4,9 @@
   "description": "A lightweight web-based projection mapping application designed for mobile phones and portable projectors. Create and perform projection mapping on the go without requiring an internet connection.",
   "main": "app.js",
   "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

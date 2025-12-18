@@ -41,6 +41,10 @@ export class Polygon {
   isDirty: boolean;
   useAsMask: boolean;
 
+  // Hierarchy
+  parent: Polygon | null;
+  children: Polygon[];
+
   constructor(
     vertices: Vertex[],
     id: number | null = null,
@@ -82,6 +86,10 @@ export class Polygon {
     this.isDirty = false;
     this.useAsMask = false;
 
+    // Hierarchy
+    this.parent = null;
+    this.children = [];
+
     if (type === "drawing") {
       this.initDrawingCanvas();
     }
@@ -106,6 +114,17 @@ export class Polygon {
           x: bounds.minX + (x / (this.gridSize - 1)) * bounds.width,
           y: bounds.minY + (y / (this.gridSize - 1)) * bounds.height,
         });
+      }
+    }
+  }
+
+  setGridSize(size: number) {
+    if (this.gridSize !== size) {
+      // If we resize, we unfortunately lose current warp points for now unless we interpolate
+      // For simplicity, just reset grid based on bounding box
+      this.gridSize = size;
+      if (this.warpMode) {
+        this.createGrid();
       }
     }
   }
@@ -334,9 +353,11 @@ export class Polygon {
       effects: this.effects,
       warpMode: this.warpMode,
       gridVertices: this.gridVertices,
+      gridSize: this.gridSize,
       audioSettings: this.audioSettings,
       useAsMask: this.useAsMask,
       drawingData: this.drawingCanvas ? this.drawingCanvas.toDataURL() : null,
+      children: this.children.map((c) => c.toJSON()),
     };
   }
 
@@ -350,6 +371,7 @@ export class Polygon {
     poly.effects = data.effects || [];
     poly.warpMode = data.warpMode || false;
     poly.gridVertices = data.gridVertices || [];
+    poly.gridSize = data.gridSize || 3;
     poly.audioSettings = data.audioSettings || {
       bassScale: 1.0,
       midScale: 1.0,
@@ -371,6 +393,15 @@ export class Polygon {
       };
       img.src = data.drawingData;
     }
+
+    if (data.children) {
+      poly.children = data.children.map((c: any) => {
+        const child = Polygon.fromJSON(c);
+        child.parent = poly;
+        return child;
+      });
+    }
+
     return poly;
   }
 }
@@ -402,6 +433,13 @@ export class ShapeFactory {
       null,
       "quad"
     );
+  }
+
+  static createWarpRect(centerX: number, centerY: number, size: number = 0.15) {
+    const p = ShapeFactory.createSquare(centerX, centerY, size);
+    p.warpMode = true;
+    p.createGrid();
+    return p;
   }
 
   static createCanvas(centerX: number, centerY: number, size: number = 0.5) {

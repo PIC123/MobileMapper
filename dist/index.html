@@ -10,8 +10,8 @@
     <title>Mobile Mapper - Projection Mapping</title>
     <link rel="manifest" href="manifest.json">
     <link rel="stylesheet" href="styles.css">
-  <script type="module" crossorigin src="./assets/index-BbjJi8e_.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-sXMq9tvL.css">
+  <script type="module" crossorigin src="./assets/index-mrXCutmI.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-B9e9jJyM.css">
 </head>
 <body>
     <div id="app">
@@ -22,6 +22,11 @@
         <!-- Toggle Sidebar Button (Fixed Position) -->
         <button id="toggleSidebarBtn" class="toggle-sidebar-btn">
             <span class="icon">☰</span>
+        </button>
+
+        <!-- Toggle Right Sidebar Button (Fixed Position) -->
+        <button id="toggleRightSidebarBtn" class="toggle-sidebar-btn right-toggle">
+            <span class="icon">⚙</span>
         </button>
 
         <!-- Left Sidebar (Tools & Layers) -->
@@ -35,6 +40,7 @@
                     <button id="addCircleBtn" class="tool-btn" title="Add Circle">○</button>
                     <button id="drawPolygonBtn" class="tool-btn" title="Draw Polygon">⬠</button>
                     <button id="addCanvasBtn" class="tool-btn" title="Add Drawing Canvas">🖌️</button>
+                    <button id="addWarpRectBtn" class="tool-btn" title="Add Warp Mesh">▦</button>
                     <button id="selectBtn" class="tool-btn active" title="Select/Move">⊕</button>
                     <button id="brushBtn" class="tool-btn" title="Brush Tool">✏️</button>
                     <button id="deleteBtn" class="tool-btn danger" title="Delete Selected">🗑</button>
@@ -87,6 +93,10 @@
                         <input type="checkbox" id="warpToggle">
                         <span class="slider"></span>
                     </div>
+                </div>
+                <div id="warpSettings" class="control-group hidden">
+                    <label>Grid Size: <span id="gridSizeVal">3</span>x<span id="gridSizeVal2">3</span></label>
+                    <input type="range" id="gridSizeSlider" min="2" max="10" step="1" value="3">
                 </div>
                 <div class="control-group row" style="margin-top: 8px;">
                     <label>Show Curve Controls</label>
