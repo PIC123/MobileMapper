@@ -28,6 +28,8 @@ export class Polygon {
   shaderType: string;
   videoSrc: string | null;
   videoElement: HTMLVideoElement | null;
+  imageSrc: string | null;
+  imageElement: HTMLImageElement | null;
   selected: boolean;
   effects: Effect[];
   warpMode: boolean;
@@ -59,6 +61,8 @@ export class Polygon {
     this.shaderType = "rainbow";
     this.videoSrc = null;
     this.videoElement = null;
+    this.imageSrc = null;
+    this.imageElement = null;
 
     // State
     this.selected = false;
@@ -147,6 +151,8 @@ export class Polygon {
       params = { scale: 10.0, intensity: 0.5, speed: 1.0 };
     else if (type === "border")
       params = { width: 0.02, color: { r: 1, g: 1, b: 1 }, speed: 2.0 };
+    else if (type === "edge_detection")
+      params = { threshold: 0.1, color: { r: 1, g: 1, b: 1 }, mode: 0, speed: 1.0 }; // mode: 0=Static, 1=Pulse, 2=Audio
 
     this.effects.push({ id, type, params });
   }
@@ -169,6 +175,9 @@ export class Polygon {
     } else if (type === "video") {
       this.videoSrc = data;
       this.loadVideo();
+    } else if (type === "image") {
+      this.imageSrc = data;
+      this.loadImage();
     }
   }
 
@@ -181,6 +190,16 @@ export class Polygon {
     this.videoElement.setAttribute("playsinline", "");
     this.videoElement.setAttribute("webkit-playsinline", "");
     this.videoElement.play().catch((e) => console.warn("Video play failed", e));
+  }
+
+  loadImage() {
+    if (!this.imageSrc) return;
+    this.imageElement = new Image();
+    this.imageElement.crossOrigin = "anonymous";
+    this.imageElement.onload = () => {
+        this.isDirty = true;
+    };
+    this.imageElement.src = this.imageSrc;
   }
 
   // Geometry Helpers
@@ -350,6 +369,7 @@ export class Polygon {
       contentType: this.contentType,
       shaderType: this.shaderType,
       videoSrc: this.videoSrc,
+      imageSrc: this.imageSrc,
       effects: this.effects,
       warpMode: this.warpMode,
       gridVertices: this.gridVertices,
@@ -367,6 +387,7 @@ export class Polygon {
     poly.contentType = data.contentType;
     poly.shaderType = data.shaderType;
     poly.videoSrc = data.videoSrc;
+    poly.imageSrc = data.imageSrc;
     poly.useAsMask = data.useAsMask || false;
     poly.effects = data.effects || [];
     poly.warpMode = data.warpMode || false;
@@ -382,6 +403,10 @@ export class Polygon {
 
     if (poly.videoSrc) {
       poly.loadVideo();
+    }
+    
+    if (poly.imageSrc) {
+      poly.loadImage();
     }
 
     if (data.type === "drawing" && data.drawingData) {

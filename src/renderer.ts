@@ -163,6 +163,13 @@ export class Renderer {
         borderColor: gl.getUniformLocation(program, "u_borderColor"),
         borderSpeed: gl.getUniformLocation(program, "u_borderSpeed"),
 
+        // Edge Detection
+        enableEdge: gl.getUniformLocation(program, "u_enableEdge"),
+        edgeThreshold: gl.getUniformLocation(program, "u_edgeThreshold"),
+        edgeColor: gl.getUniformLocation(program, "u_edgeColor"),
+        edgeMode: gl.getUniformLocation(program, "u_edgeMode"),
+        edgeSpeed: gl.getUniformLocation(program, "u_edgeSpeed"),
+
         // Audio
         audioLow: gl.getUniformLocation(program, "u_audioLow"),
         audioMid: gl.getUniformLocation(program, "u_audioMid"),
@@ -193,7 +200,7 @@ export class Renderer {
       return;
     }
 
-    if (polygon.contentType === "video" || polygon.contentType === "drawing") {
+    if (polygon.contentType === "video" || polygon.contentType === "drawing" || polygon.contentType === "image") {
       programInfo = this.getProgramInfo("video", VIDEO_FRAGMENT_TEMPLATE);
     } else {
       if (isMaskRender) {
@@ -323,6 +330,11 @@ export class Renderer {
       borderWidth = 0.0,
       borderColor = { r: 1, g: 1, b: 1 },
       borderSpeed = 0.0;
+    let enableEdge = 0,
+      edgeThreshold = 0.1,
+      edgeColor = { r: 1, g: 1, b: 1 },
+      edgeMode = 0,
+      edgeSpeed = 1.0;
 
     if (!isMaskRender) {
       // Don't apply effects to the mask layer itself
@@ -346,6 +358,14 @@ export class Renderer {
           borderWidth = p.width;
           if (p.color) borderColor = p.color;
           borderSpeed = p.speed || 0.0;
+        }
+
+        if (effect.type === "edge_detection") {
+          enableEdge = 1;
+          edgeThreshold = p.threshold;
+          if (p.color) edgeColor = p.color;
+          edgeMode = p.mode || 0;
+          edgeSpeed = p.speed || 1.0;
         }
       });
     }
@@ -374,6 +394,14 @@ export class Renderer {
         borderColor.b
       );
     }
+
+    gl.uniform1i(programInfo.uniformLocations.enableEdge, enableEdge);
+    gl.uniform1f(programInfo.uniformLocations.edgeThreshold, edgeThreshold);
+    if (edgeColor) {
+        gl.uniform3f(programInfo.uniformLocations.edgeColor, edgeColor.r, edgeColor.g, edgeColor.b);
+    }
+    gl.uniform1i(programInfo.uniformLocations.edgeMode, edgeMode);
+    gl.uniform1f(programInfo.uniformLocations.edgeSpeed, edgeSpeed);
 
     gl.uniform1f(programInfo.uniformLocations.audioLow, this.audioData.low);
     gl.uniform1f(programInfo.uniformLocations.audioMid, this.audioData.mid);
@@ -422,12 +450,20 @@ export class Renderer {
     // Set Content Texture (Unit 0)
     if (
       (polygon.contentType === "video" && polygon.videoElement) ||
-      (polygon.contentType === "drawing" && polygon.drawingCanvas)
+      (polygon.contentType === "drawing" && polygon.drawingCanvas) ||
+      (polygon.contentType === "image" && polygon.imageElement && polygon.imageElement.complete)
     ) {
       let texture = this.videoTextures.get(polygon.id);
       if (!texture) {
         texture = gl.createTexture()!;
         this.videoTextures.set(polygon.id, texture);
+        
+        // Initial upload for image to handle case where isDirty might have triggered before texture creation
+        if (polygon.contentType === "image") {
+             gl.bindTexture(gl.TEXTURE_2D, texture);
+             gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, polygon.imageElement!);
+             polygon.isDirty = false;
+        }
       }
 
       gl.activeTexture(gl.TEXTURE0);
@@ -436,6 +472,8 @@ export class Renderer {
       const source =
         polygon.contentType === "video"
           ? polygon.videoElement!
+          : polygon.contentType === "image"
+          ? polygon.imageElement!
           : polygon.drawingCanvas!;
 
       if (polygon.contentType === "video") {
@@ -449,7 +487,7 @@ export class Renderer {
           source
         );
       } else {
-        // Drawing canvas only needs update if dirty
+        // Drawing canvas and Images only need update if dirty
         if (polygon.isDirty) {
           gl.texImage2D(
             gl.TEXTURE_2D,

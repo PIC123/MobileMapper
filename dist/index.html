@@ -10,7 +10,7 @@
     <title>Mobile Mapper - Projection Mapping</title>
     <link rel="manifest" href="manifest.json">
     <link rel="stylesheet" href="styles.css">
-  <script type="module" crossorigin src="./assets/index-mrXCutmI.js"></script>
+  <script type="module" crossorigin src="./assets/index-eCUdEDtb.js"></script>
   <link rel="stylesheet" crossorigin href="./assets/index-B9e9jJyM.css">
 </head>
 <body>
@@ -148,6 +148,7 @@
                         <option value="dots">Dots Pattern</option>
                         <option value="grid">Grid Pattern</option>
                         <option value="border">Animated Border</option>
+                        <option value="edge_detection">Edge Highlights</option>
                     </select>
                     <button id="addEffectBtn" class="action-btn full-width">+ Add Effect</button>
                 </div>
@@ -189,6 +190,7 @@
                 <h2>Select Content Type</h2>
                 <button class="content-type-btn" data-type="shader">Shader</button>
                 <button class="content-type-btn" data-type="video">Video</button>
+                <button class="content-type-btn" data-type="image">Image</button>
                 <button class="close-modal">Cancel</button>
             </div>
         </div>
@@ -214,6 +216,15 @@
                 <h2>Select Video</h2>
                 <input type="file" id="videoFileInput" accept="video/*" />
                 <div id="videoList" class="video-list"></div>
+                <button class="close-modal">Back</button>
+            </div>
+        </div>
+
+        <div id="imageModal" class="modal hidden">
+            <div class="modal-content">
+                <h2>Select Image</h2>
+                <input type="file" id="imageFileInput" accept="image/*" />
+                <div id="imageList" class="video-list"></div>
                 <button class="close-modal">Back</button>
             </div>
         </div>

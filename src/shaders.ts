@@ -40,6 +40,13 @@ const COMMON_UNIFORMS = `
     uniform int u_useMask;
     uniform sampler2D u_maskTexture;
     uniform vec2 u_resolution;
+    
+    // Edge Detection
+    uniform int u_enableEdge;
+    uniform float u_edgeThreshold;
+    uniform vec3 u_edgeColor;
+    uniform int u_edgeMode; // 0: Static, 1: Pulse, 2: Audio
+    uniform float u_edgeSpeed;
 `;
 
 const SHADER_HELPERS = `
@@ -71,8 +78,43 @@ const SHADER_HELPERS = `
     
     vec3 getBorderColor(float time) {
         float pulse = sin(time * u_borderSpeed) * 0.5 + 0.5; // 0 to 1
-        // Use audio for pulse if connected? Maybe later.
         return u_borderColor * (0.5 + 0.5 * pulse);
+    }
+
+    // Sobel Edge Detection
+    vec4 getEdgeColor(sampler2D tex, vec2 uv, vec2 resolution) {
+        if (u_enableEdge == 0) return vec4(0.0);
+        
+        vec2 texel = 1.0 / resolution;
+        
+        float t00 = length(texture2D(tex, uv + texel * vec2(-1, -1)).rgb);
+        float t10 = length(texture2D(tex, uv + texel * vec2( 0, -1)).rgb);
+        float t20 = length(texture2D(tex, uv + texel * vec2( 1, -1)).rgb);
+        float t01 = length(texture2D(tex, uv + texel * vec2(-1,  0)).rgb);
+        float t21 = length(texture2D(tex, uv + texel * vec2( 1,  0)).rgb);
+        float t02 = length(texture2D(tex, uv + texel * vec2(-1,  1)).rgb);
+        float t12 = length(texture2D(tex, uv + texel * vec2( 0,  1)).rgb);
+        float t22 = length(texture2D(tex, uv + texel * vec2( 1,  1)).rgb);
+        
+        float gx = t00 + 2.0 * t10 + t20 - (t02 + 2.0 * t12 + t22);
+        float gy = t00 + 2.0 * t01 + t02 - (t20 + 2.0 * t21 + t22);
+        
+        float mag = length(vec2(gx, gy));
+        
+        if (mag > u_edgeThreshold) {
+            // Calculate Edge Opacity/Color based on mode
+            float alpha = 1.0;
+            
+            if (u_edgeMode == 1) { // Pulse
+                 alpha = sin(u_time * u_edgeSpeed) * 0.5 + 0.5;
+            } else if (u_edgeMode == 2) { // Audio
+                 alpha = u_audioMid * u_audioMidScale * u_audioGain * 2.0;
+            }
+            
+            return vec4(u_edgeColor, clamp(alpha, 0.0, 1.0));
+        }
+        
+        return vec4(0.0);
     }
 
     vec4 applyMask(vec4 color, vec2 uv) {
@@ -160,6 +202,12 @@ export const VIDEO_FRAGMENT_TEMPLATE = `
         
         vec3 color = applyPattern(texColor.rgb, contentUV, u_time);
         color = applyColorAdjustments(color);
+        
+        // Edge Detection Overlay
+        vec4 edge = getEdgeColor(u_texture, contentUV, u_resolution);
+        if (edge.a > 0.0) {
+            color = mix(color, edge.rgb, edge.a);
+        }
         
         // For drawings (which use this shader), texColor.a is important.
         // For videos, it's usually 1.0.

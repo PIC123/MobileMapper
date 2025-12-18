@@ -32,6 +32,28 @@ const safeStorage = {
 // Safe element lookup
 const getEl = (id: string): HTMLElement | null => document.getElementById(id);
 
+// Color Helpers
+const hexToRgb = (hex: string) => {
+    const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
+    hex = hex.replace(shorthandRegex, (m, r, g, b) => {
+        return r + r + g + g + b + b;
+    });
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16) / 255,
+        g: parseInt(result[2], 16) / 255,
+        b: parseInt(result[3], 16) / 255
+    } : { r: 1, g: 1, b: 1 };
+};
+
+const rgbToHex = (r: number, g: number, b: number) => {
+    const toHex = (c: number) => {
+        const hex = Math.round(c * 255).toString(16);
+        return hex.length === 1 ? "0" + hex : hex;
+    };
+    return "#" + toHex(r) + toHex(g) + toHex(b);
+};
+
 // Main application logic
 class MobileMapperApp {
   canvas: HTMLCanvasElement;
@@ -48,6 +70,7 @@ class MobileMapperApp {
   dragStart: { x: number; y: number } | null;
   editMode: boolean;
   loadedVideos: Map<string, string>;
+  loadedImages: Map<string, string>;
   controlsDragStart: { x: number; y: number } | null;
   controlsPosition: { x: number | null; y: number | null };
   uiVisible: boolean;
@@ -79,6 +102,7 @@ class MobileMapperApp {
     this.dragStart = null;
     this.editMode = true;
     this.loadedVideos = new Map();
+    this.loadedImages = new Map();
     this.controlsDragStart = null;
     this.controlsPosition = { x: null, y: null };
     this.uiVisible = true;
@@ -299,6 +323,7 @@ class MobileMapperApp {
         const type = (btn as HTMLElement).dataset.type;
         if (type === "shader") this.showShaderModal();
         else if (type === "video") this.showVideoModal();
+        else if (type === "image") this.showImageModal();
       });
     });
 
@@ -311,6 +336,11 @@ class MobileMapperApp {
     const videoInput = getEl("videoFileInput");
     if (videoInput) {
         videoInput.addEventListener("change", (e) => this.handleVideoUpload(e as any));
+    }
+
+    const imageInput = getEl("imageFileInput");
+    if (imageInput) {
+        imageInput.addEventListener("change", (e) => this.handleImageUpload(e as any));
     }
 
     const performanceOverlay = getEl("performanceOverlay");
@@ -590,6 +620,8 @@ class MobileMapperApp {
     if (infoDisplay) {
         if (poly.contentType === "video") {
           infoDisplay.textContent = "Video";
+        } else if (poly.contentType === "image") {
+          infoDisplay.textContent = "Image";
         } else {
           infoDisplay.textContent = `Shader: ${poly.shaderType}`;
         }
@@ -726,6 +758,7 @@ class MobileMapperApp {
                 </div>
             `;
       } else if (effect.type === "border") {
+        const hexColor = effect.params.color ? rgbToHex(effect.params.color.r, effect.params.color.g, effect.params.color.b) : "#ffffff";
         controls = `
                 <div class="control-group">
                     <label>Width</label>
@@ -735,6 +768,11 @@ class MobileMapperApp {
                            data-effect-id="${effect.id}" data-param="width">
                 </div>
                 <div class="control-group">
+                    <label>Color</label>
+                    <input type="color" value="${hexColor}"
+                           data-effect-id="${effect.id}" data-param="color">
+                </div>
+                <div class="control-group">
                     <label>Pulse Speed</label>
                     <input type="range" min="0" max="10" step="0.1" value="${
                       p.speed !== undefined ? p.speed : 0.0
@@ -742,6 +780,33 @@ class MobileMapperApp {
                            data-effect-id="${effect.id}" data-param="speed">
                 </div>
             `;
+      } else if (effect.type === "edge_detection") {
+        const hexColor = effect.params.color ? rgbToHex(effect.params.color.r, effect.params.color.g, effect.params.color.b) : "#ffffff";
+        controls = `
+            <div class="control-group">
+                <label>Threshold</label>
+                <input type="range" min="0.01" max="1.0" step="0.01" value="${p.threshold}"
+                        data-effect-id="${effect.id}" data-param="threshold">
+            </div>
+            <div class="control-group">
+                <label>Edge Color</label>
+                <input type="color" value="${hexColor}"
+                        data-effect-id="${effect.id}" data-param="color">
+            </div>
+            <div class="control-group">
+                <label>Animation</label>
+                <select data-effect-id="${effect.id}" data-param="mode" class="dropdown" style="width:100%; margin-top:4px; background: #333; color: white; border: 1px solid #555;">
+                    <option value="0" ${p.mode == 0 ? 'selected' : ''}>Static</option>
+                    <option value="1" ${p.mode == 1 ? 'selected' : ''}>Pulse (Time)</option>
+                    <option value="2" ${p.mode == 2 ? 'selected' : ''}>Audio Reactive</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Speed</label>
+                <input type="range" min="0" max="10" step="0.1" value="${p.speed !== undefined ? p.speed : 1.0}"
+                        data-effect-id="${effect.id}" data-param="speed">
+            </div>
+        `;
       }
 
       item.innerHTML = `
@@ -762,13 +827,18 @@ class MobileMapperApp {
         });
       }
 
-      const inputs = item.querySelectorAll('input[type="range"]');
+      const inputs = item.querySelectorAll('input, select');
       inputs.forEach((input) => {
         input.addEventListener("input", (e) => {
           const target = e.target as HTMLInputElement;
           const param = target.dataset.param!;
-          const val = parseFloat(target.value);
           const effectId = target.dataset.effectId!;
+
+          let val: any;
+          if (target.type === "checkbox") val = target.checked;
+          else if (target.type === "color") val = hexToRgb(target.value);
+          else if (target.tagName === "SELECT") val = parseInt(target.value);
+          else val = parseFloat(target.value);
 
           const update: any = {};
           update[param] = val;
@@ -1035,6 +1105,18 @@ class MobileMapperApp {
     this.renderLayersList();
   }
 
+  toggleAudio() {
+    if (this.audioManager.isActive) {
+      this.audioManager.stop();
+      this.showStatus("Audio Input Disabled");
+      getEl("audioToggleBtn")?.classList.remove("active");
+    } else {
+      this.audioManager.start();
+      this.showStatus("Audio Input Enabled");
+      getEl("audioToggleBtn")?.classList.add("active");
+    }
+  }
+
   showContentModal() {
     if (!this.selectedPolygon) {
       this.showStatus("Please select a polygon first");
@@ -1058,6 +1140,16 @@ class MobileMapperApp {
     if (videoModal) {
         videoModal.classList.remove("hidden");
         this.updateVideoList();
+    }
+  }
+
+  showImageModal() {
+    const contentModal = getEl("contentModal");
+    const imageModal = getEl("imageModal");
+    if (contentModal) contentModal.classList.add("hidden");
+    if (imageModal) {
+        imageModal.classList.remove("hidden");
+        this.updateImageList();
     }
   }
 
@@ -1086,6 +1178,16 @@ class MobileMapperApp {
     }
   }
 
+  handleImageUpload(e: any) {
+    const file = e.target.files[0];
+    if (file) {
+      const url = URL.createObjectURL(file);
+      this.loadedImages.set(file.name, url);
+      this.updateImageList();
+      e.target.value = "";
+    }
+  }
+
   updateVideoList() {
     const videoList = getEl("videoList");
     if (!videoList) return;
@@ -1098,6 +1200,21 @@ class MobileMapperApp {
         this.setPolygonContent("video", url);
       });
       videoList.appendChild(btn);
+    });
+  }
+
+  updateImageList() {
+    const list = getEl("imageList");
+    if (!list) return;
+    list.innerHTML = "";
+    this.loadedImages.forEach((url, name) => {
+      const btn = document.createElement("button");
+      btn.className = "content-type-btn";
+      btn.textContent = name;
+      btn.addEventListener("click", () => {
+        this.setPolygonContent("image", url);
+      });
+      list.appendChild(btn);
     });
   }
 
