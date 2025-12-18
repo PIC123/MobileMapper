@@ -85,6 +85,11 @@ class MobileMapperApp {
   dragStartY: number = 0;
   dragTimeout: any = null;
 
+  // History for Undo/Redo
+  history: string[] = [];
+  historyIndex: number = -1;
+  MAX_HISTORY = 20;
+
   constructor() {
     this.canvas = document.getElementById("mainCanvas") as HTMLCanvasElement;
     this.overlayCanvas = document.getElementById(
@@ -122,6 +127,95 @@ class MobileMapperApp {
       console.error("Critical Initialization Error:", e);
       this.showStatus("App failed to initialize. Check console.");
     }
+  }
+
+  saveState() {
+    // Trim redo stack if we are in the middle of history
+    if (this.historyIndex < this.history.length - 1) {
+        this.history = this.history.slice(0, this.historyIndex + 1);
+    }
+
+    const state = {
+        polygons: this.polygons.map(p => p.toJSON()),
+        // We only save references to loaded videos/images, not the blobs themselves (for memory)
+        // If user reloads page, they might be lost, but for runtime undo it's fine.
+        // Actually, loadedVideos is Map<string, string> (name, blobUrl).
+        // Since blobUrls persist for session, this is fine.
+    };
+
+    this.history.push(JSON.stringify(state));
+    if (this.history.length > this.MAX_HISTORY) {
+        this.history.shift();
+    } else {
+        this.historyIndex++;
+    }
+    
+    // Also update index if we didn't shift
+    if (this.history.length <= this.MAX_HISTORY) {
+        this.historyIndex = this.history.length - 1;
+    }
+  }
+
+  undo() {
+      if (this.historyIndex > 0) {
+          this.historyIndex--;
+          const state = JSON.parse(this.history[this.historyIndex]);
+          this.restoreState(state);
+          this.showStatus(`Undo (${this.historyIndex + 1}/${this.history.length})`);
+      } else {
+          this.showStatus("Nothing to undo");
+      }
+  }
+
+  redo() {
+      if (this.historyIndex < this.history.length - 1) {
+          this.historyIndex++;
+          const state = JSON.parse(this.history[this.historyIndex]);
+          this.restoreState(state);
+          this.showStatus(`Redo (${this.historyIndex + 1}/${this.history.length})`);
+      } else {
+          this.showStatus("Nothing to redo");
+      }
+  }
+
+  restoreState(state: any) {
+      this.selectPolygon(null); // Deselect to avoid issues
+      this.polygons = state.polygons.map((p: any) => Polygon.fromJSON(p));
+      
+      // Rebuild parent links
+      this.polygons.forEach(p => {
+        if (p.children) {
+            p.children.forEach(c => c.parent = p);
+        }
+      });
+
+      // Restore texture bindings if needed
+      this.polygons.forEach((poly) => {
+        const load = (p: Polygon) => {
+            if (p.contentType === "video") {
+                // If video already loaded in Map, use it
+                if (p.videoSrc && this.loadedVideos.has(this.getVideoNameFromUrl(p.videoSrc))) {
+                    // This logic is tricky because src is blob url. 
+                    // p.videoSrc IS the blob url.
+                    p.loadVideo();
+                } else if (p.videoSrc) {
+                    p.loadVideo();
+                }
+            } else if (p.contentType === "image") {
+                if (p.imageSrc) p.loadImage();
+            }
+            if (p.children) p.children.forEach(load);
+        };
+        load(poly);
+      });
+
+      this.renderLayersList();
+  }
+
+  getVideoNameFromUrl(url: string) {
+      // Reverse lookup in map? Or just trust url.
+      // Since blob URLs are unique session identifiers, we can just use them.
+      return url; 
   }
 
   resizeOverlay() {
@@ -298,6 +392,8 @@ class MobileMapperApp {
     bindClick("saveBtn", () => this.saveProject());
     bindClick("loadBtn", () => this.loadProjectDialog());
     bindClick("audioToggleBtn", () => this.toggleAudio());
+    bindClick("undoBtn", () => this.undo());
+    bindClick("redoBtn", () => this.redo());
       
     this.canvas.addEventListener("touchstart", (e) => this.handleTouchStart(e), { passive: false });
     this.canvas.addEventListener("touchmove", (e) => this.handleTouchMove(e), { passive: false });
@@ -378,6 +474,7 @@ class MobileMapperApp {
   }
   
   addPolygon(poly: Polygon) {
+      this.saveState(); // Save before adding
       this.polygons.push(poly);
       this.selectPolygon(poly);
       this.setTool("select");
@@ -557,6 +654,10 @@ class MobileMapperApp {
   }
 
   handlePointerUp() {
+    if (this.isDraggingVertex || (this.dragStart && this.selectedPolygon)) {
+        this.saveState();
+    }
+
     this.isDraggingVertex = false;
     
     if (this.currentTool === "draw") {
@@ -578,6 +679,7 @@ class MobileMapperApp {
     if (this.drawingVertices.length >= 3) {
       const poly = new Polygon(this.drawingVertices);
       this.addPolygon(poly);
+      // saveState is called in addPolygon
     }
     this.drawingVertices = [];
     this.isDrawing = false;
@@ -690,12 +792,14 @@ class MobileMapperApp {
       return;
     }
 
+    this.saveState();
     this.selectedPolygon.addEffect(type);
     this.updatePropertiesPanel(this.selectedPolygon);
   }
 
   removeEffect(id: string) {
     if (!this.selectedPolygon) return;
+    this.saveState();
     this.selectedPolygon.removeEffect(id);
     this.updatePropertiesPanel(this.selectedPolygon);
   }
@@ -829,6 +933,23 @@ class MobileMapperApp {
 
       const inputs = item.querySelectorAll('input, select');
       inputs.forEach((input) => {
+        // Change event triggers on pointer up for ranges, better for saving state
+        input.addEventListener("change", (e) => {
+            const target = e.target as HTMLInputElement;
+            const param = target.dataset.param!;
+            const effectId = target.dataset.effectId!;
+  
+            let val: any;
+            if (target.type === "checkbox") val = target.checked;
+            else if (target.type === "color") val = hexToRgb(target.value);
+            else if (target.tagName === "SELECT") val = parseInt(target.value);
+            else val = parseFloat(target.value);
+  
+            const update: any = {};
+            update[param] = val;
+            this.updateEffectParam(effectId, update, true);
+        });
+
         input.addEventListener("input", (e) => {
           const target = e.target as HTMLInputElement;
           const param = target.dataset.param!;
@@ -842,7 +963,7 @@ class MobileMapperApp {
 
           const update: any = {};
           update[param] = val;
-          this.updateEffectParam(effectId, update);
+          this.updateEffectParam(effectId, update, false);
         });
       });
 
@@ -850,8 +971,9 @@ class MobileMapperApp {
     });
   }
 
-  updateEffectParam(id: string, params: any) {
+  updateEffectParam(id: string, params: any, save: boolean = false) {
     if (this.selectedPolygon) {
+      if (save) this.saveState();
       this.selectedPolygon.updateEffect(id, params);
       const valLabel = getEl(`val-${id}`);
       if (valLabel && params.value !== undefined) {
@@ -1011,6 +1133,7 @@ class MobileMapperApp {
   toggleWarpMode(enabled: boolean) {
     if (this.selectedPolygon) {
       if (enabled !== this.selectedPolygon.warpMode) {
+        this.saveState();
         this.selectedPolygon.toggleWarpMode();
       }
       this.selectedVertex = null;
@@ -1082,6 +1205,7 @@ class MobileMapperApp {
 
   deleteSelected() {
     if (this.selectedPolygon) {
+      this.saveState();
         // Try deleting from main list
       const index = this.polygons.indexOf(this.selectedPolygon);
       if (index >= 0) {
@@ -1161,6 +1285,7 @@ class MobileMapperApp {
 
   setPolygonContent(type: string, data: string) {
     if (this.selectedPolygon) {
+      this.saveState();
       this.selectedPolygon.setContent(type, data);
       this.hideAllModals();
       this.showStatus(`Content updated: ${type}`);
@@ -1699,6 +1824,8 @@ class MobileMapperApp {
       if (targetId === -1 || !this.draggingLayer) return;
       if (targetId === this.draggingLayer.id) return;
       
+      this.saveState();
+
       const targetPoly = this.findPolygonById(targetId);
       if (!targetPoly) return;
       
